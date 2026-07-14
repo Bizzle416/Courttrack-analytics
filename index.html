@@ -367,7 +367,7 @@ function vOverview(d){
     h+='<div style="font-size:10px;font-weight:700;color:'+col+';text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">'+typeLabels[t]+'</div>';
     h+='<div style="display:flex;align-items:baseline;gap:8px;">';
     h+='<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:28px;font-weight:700;line-height:1;">'+w2+'–'+l2+(d2?' –'+d2:'')+'</span>';
-    h+='<span style="font-size:11px;color:var(--muted);">'+gs2.length+' game'+( gs2.length===1?'':'+'s)')+'</span>';
+    h+='<span style="font-size:11px;color:var(--muted);">'+gs2.length+' game'+(gs2.length===1?'':'s')+'</span>';
     h+='</div>';
     h+='<div style="font-size:11px;color:var(--muted);margin-top:4px;">'+( gs2.length?((pf2/gs2.length).toFixed(1)+' pts for · '+(pa2/gs2.length).toFixed(1)+' against'):'')+'</div>';
     h+='<div style="margin-top:6px;height:4px;border-radius:2px;background:#fff;overflow:hidden;"><div style="height:100%;width:'+winRate+'%;background:'+col+';border-radius:2px;"></div></div>';
@@ -410,7 +410,7 @@ function vOverview(d){
   h+='<div class="tile"><div class="v disp">'+(rebAgainstN?(rebAgainst/rebAgainstN).toFixed(1):'—')+'</div><div class="l">Reb against / game'+(rebAgainstN<gs.length?' <span title="Only tracked when opponent rebounds were logged">('+rebAgainstN+'/'+gs.length+' games)</span>':'')+'</div></div>';
   h+='<div class="tile"><div class="v disp">'+(tovForced/gs.length).toFixed(1)+'</div><div class="l">Turnovers forced / game</div></div>';
   h+='</div>';
-  if(filmedGs.length<gs.length)h+='<div class="card" style="padding:10px 16px;background:#fdf5e8;border-color:#eddcb8;font-size:11.5px;color:#6b4a06;">&#9432; '+(gs.length-filmedGs.length)+' of '+gs.length+' game'+(gs.length-filmedGs.length===1?'':'+'s)')+' had no individual opponent tracking, so opponent player names, FG breakdown and rebounds-against are incomplete for those games. See the Opposition tab for a per-game breakdown of what was captured.</div>';
+  if(filmedGs.length<gs.length)h+='<div class="card" style="padding:10px 16px;background:#fdf5e8;border-color:#eddcb8;font-size:11.5px;color:#6b4a06;">&#9432; '+(gs.length-filmedGs.length)+' of '+gs.length+' game'+(gs.length-filmedGs.length===1?'':'s')+' had no individual opponent tracking, so opponent player names, FG breakdown and rebounds-against are incomplete for those games. See the Opposition tab for a per-game breakdown of what was captured.</div>';
   const periodHeader=gs.some(g=>isTwoHalf(g))?'H1 · H2 / Q1 · Q2 · Q3 · Q4':'Q1 · Q2 · Q3 · Q4';
   h+='<div class="card"><div class="sec-h">Period momentum — '+filterLabel+'</div><table><thead><tr><th>Game</th><th>Type</th><th>Result</th><th style="text-align:left;padding-left:14px;">'+periodHeader+'</th></tr></thead><tbody>';
   gs.forEach(g=>{h+='<tr><td>'+gLabel(g)+'<span style="color:var(--muted);font-weight:400;"> · '+(g.date||'')+'</span></td><td>'+gameTypeBadge(g)+'</td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td></tr>';});
