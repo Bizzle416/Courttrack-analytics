@@ -912,14 +912,16 @@ function playerPanelParent(d,pid){
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;"><div class="court-wrap">'+courtSVG(shots)+'<div class="legend" style="margin-top:8px;"><span><i style="background:#1a9e72;border-radius:50%;"></i>Made</span><span><i style="background:#d9413f;"></i>Missed</span></div></div><div>'+zoneTable(shots)+'</div></div></div>';
   }
 
-  h+='<div class="card"><button class="adv-toggle" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'span\').textContent=this.nextElementSibling.classList.contains(\'open\')?\' Hide\':\' Show\'">Advanced stats <span> Show</span></button>';
+  h+='<div class="card"><button class="adv-toggle" onclick="toggleAdv(this)">Advanced stats <span>▼ Show</span></button>';
   h+='<div class="adv-content">';
-  h+='<div style="font-size:13px;color:var(--ink2);margin-top:8px;margin-bottom:12px;">Per-40 min rates: Pts '+per40(a.pts,a.min)+' · Reb '+per40(a.oreb+a.dreb,a.min)+' · Ast '+per40(a.ast,a.min)+' · Stl '+per40(a.stl,a.min)+' · TOV '+per40(a.tov,a.min)+'</div>';
+  h+='<div style="font-size:13px;color:var(--ink2);margin-top:8px;margin-bottom:12px;">Per-40 min rates: Pts '+per40(a.pts,a.min)+'  ·  Reb '+per40(a.oreb+a.dreb,a.min)+'  ·  Ast '+per40(a.ast,a.min)+'  ·  Stl '+per40(a.stl,a.min)+'  ·  TOV '+per40(a.tov,a.min)+'</div>';
   h+='<div style="font-size:12px;color:var(--muted);">'+fmtMin(a.min)+' total minutes · '+a.stl+' steals · '+a.blk+' blocks · +/− '+(a.pm>0?'+':'')+a.pm+'</div>';
   h+='</div></div>';
   return h;
 }
 
+
+function toggleAdv(btn){btn.nextElementSibling.classList.toggle('open');btn.querySelector('span').textContent=btn.nextElementSibling.classList.contains('open')?'▲ Hide':'▼ Show';}
 
 /* ── shell ── */
 function renderTabs(){
