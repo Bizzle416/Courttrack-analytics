@@ -946,9 +946,10 @@ function toggleAdv(btn){
 /* ── shell ── */
 function renderTabs(){
   renderTeamDropdown();
-  document.getElementById('view-tabs').innerHTML=VIEWS.map(v=>
-    '<button class="view-tab'+(v.id===curView?' active':'')+'" onclick="switchView(''+v.id+'')">'+v.label+'</button>'
-  ).join('');
+  document.getElementById('view-tabs').innerHTML=VIEWS.map(v=>{
+    const active=v.id===curView?' active':'';
+    return '<button class="view-tab'+active+'" onclick="switchView(\'' +v.id+ '\')">'+ v.label+'</button>';
+  }).join('');
 }
 function switchTeam(k){
   curTeam=k;selPlayer=null;expandedGame=null;expandedOppGame=null;
