@@ -870,15 +870,16 @@ function playerPanelParent(d,pid){
   const summary=playerSummary(a,allPlayers,d,pid);
   const pergame=d.games.map(g=>({g,s:g.summary.stats[pid]||{},m:g.summary.minutes[pid]||0}));
   const shots=d.games.flatMap(g=>homeShots(g).filter(s=>s.player_id===pid));
-
   let h='<button class="back-btn" onclick="selPlayer=null;render();">← All players</button>';
   h+='<div class="p-player-card">';
-  h+='<div style="display:flex;align-items:baseline;gap:8px;"><span class="p-player-num">'+num+'</span><span class="p-player-name">'+name+'</span></div>';
-  h+='<div class="p-player-team">'+d.team.full+' &nbsp;·&nbsp; '+a.gp+' game'+(a.gp===1?'':'s')+' played</div>';
+  h+='<div style="display:flex;align-items:baseline;gap:8px;">';
+  h+='<span class="p-player-num">'+num+'</span>';
+  h+='<span class="p-player-name">'+name+'</span>';
+  h+='</div>';
+  h+='<div class="p-player-team">'+d.team.full+'  ·  '+a.gp+' game'+(a.gp===1?'':'s')+' played</div>';
   h+='<div class="p-role-badge">'+role+'</div>';
   h+='<div class="p-summary">'+summary+'</div>';
   h+='</div>';
-
   h+='<div class="p-tiles">';
   h+='<div class="p-tile hero"><div class="v disp">'+minPG+'</div><div class="l">Min / game '+minTrend+'</div></div>';
   h+='<div class="p-tile hero"><div class="v disp">'+ptsPG+'</div><div class="l">Points / game '+ptsTrend+'</div></div>';
@@ -887,41 +888,60 @@ function playerPanelParent(d,pid){
   h+='<div class="p-tile"><div class="v disp">'+(a.gp>0?(a.ast/a.gp).toFixed(1):'—')+'</div><div class="l">Assists / game</div></div>';
   h+='<div class="p-tile t-amber"><div class="v disp">'+(a.gp>0?(a.tov/a.gp).toFixed(1):'—')+'</div><div class="l">Turnovers / game</div></div>';
   h+='</div>';
-
   h+='<div class="card"><div class="sec-h">Season development</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">';
   h+='<div class="chart-card"><h4>Minutes per game</h4>'+barChart(d.games,g=>+(g.summary.minutes[pid]||0).toFixed(1),null,'#5a6472')+'</div>';
   h+='<div class="chart-card"><h4>Points per game</h4>'+barChart(d.games,g=>(g.summary.stats[pid]||{}).pts||0,null,'#1a9e72')+'</div>';
   h+='<div class="chart-card"><h4>Rebounds per game</h4>'+barChart(d.games,g=>{const ss=g.summary.stats[pid]||{};return(ss.oreb||0)+(ss.dreb||0);},null,'#2d6fb5')+'</div>';
   h+='</div></div>';
-
-  h+='<div class="card"><div class="sec-h">Game by game</div><div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Result</th><th>Min</th><th>Pts</th><th>Reb</th><th>Ast</th></tr></thead><tbody>';
+  h+='<div class="card"><div class="sec-h">Game by game</div>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Result</th><th>Min</th><th>Pts</th><th>Reb</th><th>Ast</th></tr></thead><tbody>';
   pergame.forEach(r=>{
     const bench=r.m<1;
-    h+='<tr><td>'+gLabel(r.g)+(bench?' <span class="bench-note">(limited mins)</span>':'')+'</td>';
+    const style=bench?'color:var(--muted)':'';
+    h+='<tr>';
+    h+='<td>'+gLabel(r.g)+(bench?' <span class="bench-note">(limited mins)</span>':'')+'</td>';
     h+='<td>'+resBadge(r.g)+'</td>';
-    h+='<td style="'+(bench?'color:var(--muted)':'')+'">'+fmtMin(r.m)+'</td>';
+    h+='<td style="'+style+'">'+fmtMin(r.m)+'</td>';
     h+='<td><strong>'+(r.s.pts||0)+'</strong></td>';
     h+='<td>'+((r.s.oreb||0)+(r.s.dreb||0))+'</td>';
-    h+='<td>'+(r.s.ast||0)+'</td></tr>';
+    h+='<td>'+(r.s.ast||0)+'</td>';
+    h+='</tr>';
   });
   h+='</tbody></table></div></div>';
-
   if(shots.length){
     h+='<div class="card"><div class="sec-h">Where she scores</div>';
-    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;"><div class="court-wrap">'+courtSVG(shots)+'<div class="legend" style="margin-top:8px;"><span><i style="background:#1a9e72;border-radius:50%;"></i>Made</span><span><i style="background:#d9413f;"></i>Missed</span></div></div><div>'+zoneTable(shots)+'</div></div></div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">';
+    h+='<div class="court-wrap">'+courtSVG(shots);
+    h+='<div class="legend" style="margin-top:8px;">';
+    h+='<span><i style="background:#1a9e72;border-radius:50%;"></i>Made</span>';
+    h+='<span><i style="background:#d9413f;"></i>Missed</span>';
+    h+='</div></div>';
+    h+='<div>'+zoneTable(shots)+'</div>';
+    h+='</div></div>';
   }
-
-  h+='<div class="card"><button class="adv-toggle" onclick="toggleAdv(this)">Advanced stats <span>▼ Show</span></button>';
+  h+='<div class="card">';
+  h+='<button class="adv-toggle" onclick="toggleAdv(this)">Advanced stats <span>▼ Show</span></button>';
   h+='<div class="adv-content">';
-  h+='<div style="font-size:13px;color:var(--ink2);margin-top:8px;margin-bottom:12px;">Per-40 min rates: Pts '+per40(a.pts,a.min)+'  ·  Reb '+per40(a.oreb+a.dreb,a.min)+'  ·  Ast '+per40(a.ast,a.min)+'  ·  Stl '+per40(a.stl,a.min)+'  ·  TOV '+per40(a.tov,a.min)+'</div>';
-  h+='<div style="font-size:12px;color:var(--muted);">'+fmtMin(a.min)+' total minutes · '+a.stl+' steals · '+a.blk+' blocks · +/− '+(a.pm>0?'+':'')+a.pm+'</div>';
+  h+='<div style="font-size:13px;color:var(--ink2);margin-top:8px;margin-bottom:12px;">';
+  h+='Per-40 min rates  ·  Pts '+per40(a.pts,a.min);
+  h+=' · Reb '+per40(a.oreb+a.dreb,a.min);
+  h+=' · Ast '+per40(a.ast,a.min);
+  h+=' · Stl '+per40(a.stl,a.min);
+  h+=' · TOV '+per40(a.tov,a.min);
+  h+='</div>';
+  h+='<div style="font-size:12px;color:var(--muted);">';
+  h+=fmtMin(a.min)+' total min · '+a.stl+' steals · '+a.blk+' blocks · +/− '+(a.pm>0?'+':'')+a.pm;
+  h+='</div>';
   h+='</div></div>';
   return h;
 }
 
 
-function toggleAdv(btn){btn.nextElementSibling.classList.toggle('open');btn.querySelector('span').textContent=btn.nextElementSibling.classList.contains('open')?'▲ Hide':'▼ Show';}
+function toggleAdv(btn){
+  btn.nextElementSibling.classList.toggle('open');
+  btn.querySelector('span').textContent=btn.nextElementSibling.classList.contains('open')?'▲ Hide':'▼ Show';
+}
 
 /* ── shell ── */
 function renderTabs(){
@@ -947,7 +967,7 @@ async function render(reload){
     if(reload||!cache[curTeam])mainEl.innerHTML='<div class="loading">Loading season data&hellip;</div>';
     const d=await loadTeam(curTeam);
     const t=d.team;
-    let h='<div class="page-hd"><div class="page-hd-team">'+t.full+'</div><div class="page-hd-meta">'+t.comp+' &nbsp;&middot;&nbsp; '+d.games.length+' game'+(d.games.length===1?'':'s')+' synced</div></div>';
+    let h='<div class="page-hd"><div class="page-hd-team">'+t.full+'</div><div class="page-hd-meta">'+t.comp+'  ·  '+d.games.length+' game'+(d.games.length===1?'':'s')+' synced</div></div>';
     if(IS_COACH){
       if(curView==='overview')h+=vOverview(d);
       else if(curView==='games')h+=vGames(d);
