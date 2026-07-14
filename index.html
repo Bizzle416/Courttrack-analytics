@@ -129,6 +129,7 @@ const VIEWS=[{id:'overview',label:'Overview'},{id:'games',label:'Games'},{id:'pl
 let curTeam=TEAMS[0].key, curView='overview', cache={}, selPlayer=null, expandedGame=null, expandedOppGame=null;
 let shootFilters={game:'all',player:'all',q:'all',result:'all'};
 let oppShootFilters={game:'all',q:'all',result:'all'};
+let activeGameType='all'; // 'all' | 'vjbl' | 'domestic' | 'tournament'
 
 /* ── zone model (ported verbatim from tracker) ── */
 const ARC_CX=150,ARC_CY=17.1,ARC_R=130;
@@ -177,14 +178,16 @@ function buildNames(t,games){
 }
 function pname(names,pid){return names[pid]?names[pid].name:'Player '+pid;}
 function pnum(names,pid){return names[pid]?names[pid].num:'';}
+function isTwoHalf(g){return g.gameType==='domestic'||g.gameType==='tournament';}
 function quarterScores(g){
   if(!g.timeline||!g.timeline.length)return null;
   const per={}; g.timeline.forEach(ev=>{ if(ev.q!=null&&ev.scoreHome!=null)per[ev.q]={h:ev.scoreHome,a:ev.scoreAway}; });
+  const maxPeriods=isTwoHalf(g)?2:4;
   const qs=[],maxQ=Math.max(...Object.keys(per).map(Number),1);
   let ph=0,pa=0;
-  for(let q=1;q<=Math.min(maxQ,4);q++){
+  for(let q=1;q<=Math.min(maxQ,maxPeriods);q++){
     if(!per[q]){qs.push(null);continue;}
-    qs.push({h:per[q].h-ph,a:per[q].a-pa}); ph=per[q].h; pa=per[q].a;
+    qs.push({h:per[q].h-ph,a:per[q].a-pa,label:isTwoHalf(g)?'H'+q:'Q'+q}); ph=per[q].h; pa=per[q].a;
   }
   return qs;
 }
@@ -244,15 +247,27 @@ function pct(m,a){return a?Math.round(m/a*100)+'%':'—';}
 function per40(v,min){return min>0.5?(v*40/min).toFixed(1):'—';}
 function resBadge(g){const d=(g.scoreHome||0)-(g.scoreAway||0);return d>0?'<span class="badge w">W '+g.scoreHome+'–'+g.scoreAway+'</span>':d<0?'<span class="badge l">L '+g.scoreHome+'–'+g.scoreAway+'</span>':'<span class="badge d">D '+g.scoreHome+'–'+g.scoreAway+'</span>';}
 function gLabel(g){return (g.round?'R'+g.round+' ':'')+'vs '+(g.opponent||'?');}
+function gameTypeBadge(g){
+  const t=g.gameType||'vjbl';
+  const map={vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'};
+  const col={vjbl:'#2d6fb5',domestic:'#1a9e72',tournament:'#8a5cc7'};
+  const bg={vjbl:'#e8f0fb',domestic:'#eaf7f1',tournament:'#f2eaff'};
+  const label=map[t]||t;const c=col[t]||'#5a6472';const b=bg[t]||'#f0f0f0';
+  return '<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:'+b+';color:'+c+';">'+label+'</span>';
+}
+function filteredGames(games){
+  if(activeGameType==='all')return games;
+  return games.filter(g=>(g.gameType||'vjbl')===activeGameType);
+}
 
 /* ── momentum strip ── */
 function qstrip(g){
   const qs=g._q;
   if(!qs)return'<span class="qstrip"><span class="qcell na">?</span></span>';
   return '<span class="qstrip">'+qs.map((q,i)=>{
-    if(!q)return'<span class="qcell na">Q'+(i+1)+'</span>';
-    const d=q.h-q.a,cls=d>0?'w':d<0?'l':'d';
-    return'<span class="qcell '+cls+'" title="Q'+(i+1)+': '+q.h+'–'+q.a+'">'+(d>0?'+':'')+d+'</span>';
+    if(!q)return'<span class="qcell na">'+(isTwoHalf(g)?'H':'Q')+(i+1)+'</span>';
+    const d=q.h-q.a,cls=d>0?'w':d<0?'l':'d',lbl=q.label||(isTwoHalf(g)?'H':'Q')+(i+1);
+    return'<span class="qcell '+cls+'" title="'+lbl+': '+q.h+'–'+q.a+'">'+(d>0?'+':'')+d+'</span>';
   }).join('')+'</span>';
 }
 
@@ -314,8 +329,59 @@ function homeShots(g){return (g.shots||[]).filter(s=>s.shotTeam!=='opp');}
 
 /* ── views ── */
 function vOverview(d){
-  const gs=d.games;
-  if(!gs.length)return'<div class="card"><div class="loading">No completed games synced for this team yet.</div></div>';
+  const allGs=d.games;
+  if(!allGs.length)return'<div class="card"><div class="loading">No completed games synced for this team yet.</div></div>';
+
+  // ── LANDING STRIP: breakdown by game type ──
+  const types=['vjbl','domestic','tournament'];
+  const typeLabels={vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'};
+  const typeCols={vjbl:'#2d6fb5',domestic:'#1a9e72',tournament:'#8a5cc7'};
+  const typeBgs={vjbl:'#e8f0fb',domestic:'#eaf7f1',tournament:'#f2eaff'};
+  const byType={};
+  types.forEach(t=>{byType[t]=allGs.filter(g=>(g.gameType||'vjbl')===t);});
+  const hasTypes=types.filter(t=>byType[t].length>0);
+
+  let h='<div class="card" style="margin-bottom:18px;">';
+  h+='<div class="sec-h">Season at a glance — filter by game type</div>';
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">';
+  // All button
+  const allActive=activeGameType==='all';
+  h+='<button onclick="activeGameType=\'all\';render();" style="font-family:inherit;cursor:pointer;padding:8px 16px;border-radius:8px;border:2px solid '+( allActive?'#101d31':'var(--line)')+';background:'+( allActive?'#101d31':'#fff')+';color:'+( allActive?'#fff':'var(--ink)')+';font-size:12px;font-weight:700;">All ('+allGs.length+')</button>';
+  hasTypes.forEach(t=>{
+    const gs2=byType[t],active=activeGameType===t;
+    const w2=gs2.filter(g=>g.scoreHome>g.scoreAway).length,l2=gs2.filter(g=>g.scoreHome<g.scoreAway).length,d2=gs2.length-w2-l2;
+    const col=typeCols[t],bg2=typeBgs[t];
+    h+='<button onclick="activeGameType=\''+t+'\';render();" style="font-family:inherit;cursor:pointer;padding:8px 16px;border-radius:8px;border:2px solid '+( active?col:'var(--line)')+';background:'+( active?col:'#fff')+';color:'+( active?'#fff':'var(--ink)')+';font-size:12px;font-weight:700;">'+typeLabels[t]+' ('+gs2.length+') '+'<span style="font-weight:400;opacity:0.85;">'+w2+'W–'+l2+'L'+(d2?' –'+d2+'D':'')+'</span></button>';
+  });
+  h+='</div>';
+
+  // Mini record cards per type (always visible)
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">';
+  hasTypes.forEach(t=>{
+    const gs2=byType[t];
+    const w2=gs2.filter(g=>g.scoreHome>g.scoreAway).length,l2=gs2.filter(g=>g.scoreHome<g.scoreAway).length,d2=gs2.length-w2-l2;
+    const pf2=gs2.reduce((a,g)=>a+(g.scoreHome||0),0),pa2=gs2.reduce((a,g)=>a+(g.scoreAway||0),0);
+    const col=typeCols[t],bg2=typeBgs[t];
+    const winRate=gs2.length?Math.round(w2/gs2.length*100):0;
+    h+='<div style="background:'+bg2+';border:1px solid '+col+'40;border-radius:8px;padding:12px 14px;">';
+    h+='<div style="font-size:10px;font-weight:700;color:'+col+';text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">'+typeLabels[t]+'</div>';
+    h+='<div style="display:flex;align-items:baseline;gap:8px;">';
+    h+='<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:28px;font-weight:700;line-height:1;">'+w2+'–'+l2+(d2?' –'+d2:'')+'</span>';
+    h+='<span style="font-size:11px;color:var(--muted);">'+gs2.length+' game'+( gs2.length===1?'':'+'s)')+'</span>';
+    h+='</div>';
+    h+='<div style="font-size:11px;color:var(--muted);margin-top:4px;">'+( gs2.length?((pf2/gs2.length).toFixed(1)+' pts for · '+(pa2/gs2.length).toFixed(1)+' against'):'')+'</div>';
+    h+='<div style="margin-top:6px;height:4px;border-radius:2px;background:#fff;overflow:hidden;"><div style="height:100%;width:'+winRate+'%;background:'+col+';border-radius:2px;"></div></div>';
+    h+='</div>';
+  });
+  h+='</div></div>';
+
+  // ── REST OF OVERVIEW USES FILTERED GAMES ──
+  const gs=filteredGames(allGs);
+  if(!gs.length){
+    h+='<div class="card"><div style="color:var(--muted);font-size:13px;padding:20px 0;text-align:center;">No '+typeLabels[activeGameType]+' games synced yet.</div></div>';
+    return h;
+  }
+
   const w=gs.filter(g=>g.scoreHome>g.scoreAway).length,l=gs.filter(g=>g.scoreHome<g.scoreAway).length,dr=gs.length-w-l;
   const pf=gs.reduce((a,g)=>a+(g.scoreHome||0),0),pa=gs.reduce((a,g)=>a+(g.scoreAway||0),0);
   const tov=gs.reduce((a,g)=>a+g._tot.tov,0),reb=gs.reduce((a,g)=>a+g._tot.reb,0);
@@ -328,46 +394,57 @@ function vOverview(d){
   const rebAgainst=gs.reduce((a,g)=>{const o=oppTeamTotals(g);return a+(o.reb||0);},0);
   const rebAgainstN=gs.filter(g=>{const o=oppTeamTotals(g);return (o.reb||0)>0;}).length;
   const tovForced=gs.reduce((a,g)=>{const o=oppTeamTotals(g);return a+(o.tov||0);},0);
-  let h='<div class="tiles">'
-    +'<div class="tile"><div class="v disp">'+w+'–'+l+(dr?'–'+dr:'')+'</div><div class="l">Record</div></div>'
-    +'<div class="tile win"><div class="v disp">'+(pf/gs.length).toFixed(1)+'</div><div class="l">Points for / game</div></div>'
-    +'<div class="tile loss"><div class="v disp">'+(pa/gs.length).toFixed(1)+'</div><div class="l">Points against / game</div></div>'
-    +'<div class="tile"><div class="v disp">'+pct(fgm,fga)+'</div><div class="l">Season FG% ('+fgm+'/'+fga+')</div></div>'
-    +'<div class="tile"><div class="v disp">'+pct(fgm3,fga3)+'</div><div class="l">3PT% ('+fgm3+'/'+fga3+')</div></div>'
-    +'<div class="tile"><div class="v disp">'+pct(ftm,fta)+'</div><div class="l">FT% ('+ftm+'/'+fta+')</div></div>'
-    +'<div class="tile amber"><div class="v disp">'+(tov/gs.length).toFixed(1)+'</div><div class="l">Turnovers / game</div></div>'
-    +'<div class="tile"><div class="v disp">'+(reb/gs.length).toFixed(1)+'</div><div class="l">Rebounds / game</div></div>'
-    +'<div class="tile"><div class="v disp">'+(ast/gs.length).toFixed(1)+'</div><div class="l">Assists / game</div></div>'
-    +'<div class="tile"><div class="v disp">'+(stl/gs.length).toFixed(1)+' · '+(blk/gs.length).toFixed(1)+'</div><div class="l">Steals · Blocks / game</div></div>'
-    +'<div class="tile amber"><div class="v disp">'+foul+' · '+viol+'</div><div class="l">Total fouls · violations</div></div>'
-    +'<div class="tile"><div class="v disp">'+(rebAgainstN?(rebAgainst/rebAgainstN).toFixed(1):'—')+'</div><div class="l">Rebounds against / game'+(rebAgainstN<gs.length?' <span title="Only tracked when opponent rebounds were logged">('+rebAgainstN+'/'+gs.length+' games)</span>':'')+'</div></div>'
-    +'<div class="tile"><div class="v disp">'+(tovForced/gs.length).toFixed(1)+'</div><div class="l">Turnovers forced / game</div></div>'
-    +'</div>';
-  if(filmedGs.length<gs.length)h+='<div class="card" style="padding:10px 16px;background:#fdf5e8;border-color:#eddcb8;font-size:11.5px;color:#6b4a06;">&#9432; '+(gs.length-filmedGs.length)+' of '+gs.length+' game'+(gs.length-filmedGs.length===1?'':'s')+' had no individual opponent tracking, so opponent player names, FG breakdown and rebounds-against are incomplete for those games. See the Opposition tab for a per-game breakdown of what was captured.</div>';
-  h+='<div class="card"><div class="sec-h">Quarter momentum — every game, every quarter</div><table><thead><tr><th>Game</th><th>Result</th><th style="text-align:left;padding-left:14px;">Q1 · Q2 · Q3 · Q4</th></tr></thead><tbody>';
-  gs.forEach(g=>{h+='<tr><td>'+gLabel(g)+'<span style="color:var(--muted);font-weight:400;"> · '+(g.date||'')+'</span></td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td></tr>';});
-  h+='</tbody></table><div class="legend" style="margin-top:10px;"><span><i style="background:var(--win);"></i>Won quarter</span><span><i style="background:var(--loss);"></i>Lost quarter</span><span><i style="background:#9aa4b2;"></i>Level</span></div></div>';
-  h+='<div class="charts">'
-    +'<div class="chart-card"><h4>Points for vs against</h4>'+barChart(gs,g=>g.scoreHome||0,g=>g.scoreAway||0,'#1a9e72','#d9413f')+'<div class="legend"><span><i style="background:#1a9e72;"></i>For</span><span><i style="background:#d9413f;"></i>Against</span></div></div>'
-    +'<div class="chart-card"><h4>Field goal % by game</h4>'+barChart(gs,g=>g._tot.fga?Math.round(g._tot.fgm/g._tot.fga*100):0,null,'#2d6fb5',null,v=>v+'%')+'</div>'
-    +'<div class="chart-card"><h4>Turnovers by game</h4>'+barChart(gs,g=>g._tot.tov,null,'#c87d1a')+'</div>'
-    +'<div class="chart-card"><h4>Rebounds by game</h4>'+barChart(gs,g=>g._tot.reb,null,'#5a6472')+'</div>'
-    +'<div class="chart-card"><h4>Assists by game</h4>'+barChart(gs,g=>g._tot.ast,null,'#1a9e72')+'</div>'
-    +'<div class="chart-card"><h4>Steals vs blocks by game</h4>'+barChart(gs,g=>g._tot.stl,g=>g._tot.blk,'#2d6fb5','#8a5cc7')+'<div class="legend"><span><i style="background:#2d6fb5;"></i>Steals</span><span><i style="background:#8a5cc7;"></i>Blocks</span></div></div>'
-    +'<div class="chart-card"><h4>Team fouls by game</h4>'+barChart(gs,g=>g._tot.foul,null,'#d9413f')+'</div>'
+  const filterLabel=activeGameType==='all'?'All games':typeLabels[activeGameType]+' games';
+  h+='<div class="tiles">';
+  h+='<div class="tile"><div class="v disp">'+w+'–'+l+(dr?'–'+dr:'')+'</div><div class="l">Record ('+filterLabel+')</div></div>';
+  h+='<div class="tile win"><div class="v disp">'+(pf/gs.length).toFixed(1)+'</div><div class="l">Points for / game</div></div>';
+  h+='<div class="tile loss"><div class="v disp">'+(pa/gs.length).toFixed(1)+'</div><div class="l">Points against / game</div></div>';
+  h+='<div class="tile"><div class="v disp">'+pct(fgm,fga)+'</div><div class="l">FG% ('+fgm+'/'+fga+')</div></div>';
+  h+='<div class="tile"><div class="v disp">'+pct(fgm3,fga3)+'</div><div class="l">3PT% ('+fgm3+'/'+fga3+')</div></div>';
+  h+='<div class="tile"><div class="v disp">'+pct(ftm,fta)+'</div><div class="l">FT% ('+ftm+'/'+fta+')</div></div>';
+  h+='<div class="tile amber"><div class="v disp">'+(tov/gs.length).toFixed(1)+'</div><div class="l">Turnovers / game</div></div>';
+  h+='<div class="tile"><div class="v disp">'+(reb/gs.length).toFixed(1)+'</div><div class="l">Rebounds / game</div></div>';
+  h+='<div class="tile"><div class="v disp">'+(ast/gs.length).toFixed(1)+'</div><div class="l">Assists / game</div></div>';
+  h+='<div class="tile"><div class="v disp">'+(stl/gs.length).toFixed(1)+' · '+(blk/gs.length).toFixed(1)+'</div><div class="l">Steals · Blocks / game</div></div>';
+  h+='<div class="tile amber"><div class="v disp">'+foul+' · '+viol+'</div><div class="l">Total fouls · violations</div></div>';
+  h+='<div class="tile"><div class="v disp">'+(rebAgainstN?(rebAgainst/rebAgainstN).toFixed(1):'—')+'</div><div class="l">Reb against / game'+(rebAgainstN<gs.length?' <span title="Only tracked when opponent rebounds were logged">('+rebAgainstN+'/'+gs.length+' games)</span>':'')+'</div></div>';
+  h+='<div class="tile"><div class="v disp">'+(tovForced/gs.length).toFixed(1)+'</div><div class="l">Turnovers forced / game</div></div>';
+  h+='</div>';
+  if(filmedGs.length<gs.length)h+='<div class="card" style="padding:10px 16px;background:#fdf5e8;border-color:#eddcb8;font-size:11.5px;color:#6b4a06;">&#9432; '+(gs.length-filmedGs.length)+' of '+gs.length+' game'+(gs.length-filmedGs.length===1?'':'+'s)')+' had no individual opponent tracking, so opponent player names, FG breakdown and rebounds-against are incomplete for those games. See the Opposition tab for a per-game breakdown of what was captured.</div>';
+  const periodHeader=gs.some(g=>isTwoHalf(g))?'H1 · H2 / Q1 · Q2 · Q3 · Q4':'Q1 · Q2 · Q3 · Q4';
+  h+='<div class="card"><div class="sec-h">Period momentum — '+filterLabel+'</div><table><thead><tr><th>Game</th><th>Type</th><th>Result</th><th style="text-align:left;padding-left:14px;">'+periodHeader+'</th></tr></thead><tbody>';
+  gs.forEach(g=>{h+='<tr><td>'+gLabel(g)+'<span style="color:var(--muted);font-weight:400;"> · '+(g.date||'')+'</span></td><td>'+gameTypeBadge(g)+'</td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td></tr>';});
+  h+='</tbody></table><div class="legend" style="margin-top:10px;"><span><i style="background:var(--win);"></i>Won period</span><span><i style="background:var(--loss);"></i>Lost period</span><span><i style="background:#9aa4b2;"></i>Level</span></div></div>';
+  h+='<div class="charts">';
+  h+='<div class="chart-card"><h4>Points for vs against</h4>'+barChart(gs,g=>g.scoreHome||0,g=>g.scoreAway||0,'#1a9e72','#d9413f')+'<div class="legend"><span><i style="background:#1a9e72;"></i>For</span><span><i style="background:#d9413f;"></i>Against</span></div></div>';
+  h+='<div class="chart-card"><h4>Field goal % by game</h4>'+barChart(gs,g=>g._tot.fga?Math.round(g._tot.fgm/g._tot.fga*100):0,null,'#2d6fb5',null,v=>v+'%')+'</div>';
+  h+='<div class="chart-card"><h4>Turnovers by game</h4>'+barChart(gs,g=>g._tot.tov,null,'#c87d1a')+'</div>';
+  h+='<div class="chart-card"><h4>Rebounds by game</h4>'+barChart(gs,g=>g._tot.reb,null,'#5a6472')+'</div>';
+  h+='<div class="chart-card"><h4>Assists by game</h4>'+barChart(gs,g=>g._tot.ast,null,'#1a9e72')+'</div>';
+  h+='<div class="chart-card"><h4>Steals vs blocks by game</h4>'+barChart(gs,g=>g._tot.stl,g=>g._tot.blk,'#2d6fb5','#8a5cc7')+'<div class="legend"><span><i style="background:#2d6fb5;"></i>Steals</span><span><i style="background:#8a5cc7;"></i>Blocks</span></div></div>';
+  h+='<div class="chart-card"><h4>Team fouls by game</h4>'+barChart(gs,g=>g._tot.foul,null,'#d9413f')+'</div>';
     +'<div class="chart-card"><h4>3PT attempts vs makes</h4>'+barChart(gs,g=>g._tot.fga3,g=>g._tot.fgm3,'#e3ddd0','#c87d1a')+'<div class="legend"><span><i style="background:#e3ddd0;"></i>Attempts</span><span><i style="background:#c87d1a;"></i>Makes</span></div></div>'
     +'</div>';
   return h;
 }
 
 function vGames(d){
-  const gs=d.games;
-  if(!gs.length)return'<div class="card"><div class="loading">No completed games synced yet.</div></div>';
-  let h='<div class="card"><div class="sec-h">Season game log — click a game for the full box score</div><div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Date</th><th>Result</th><th style="text-align:left;padding-left:14px;">Quarters</th><th>FG</th><th>TOV</th><th>REB</th></tr></thead><tbody>';
+  const allGsV=d.games;
+  if(!allGsV.length)return'<div class="card"><div class="loading">No completed games synced yet.</div></div>';
+  const gTypeOpts=['all','vjbl','domestic','tournament'];
+  const gTypeLbls={all:'All types',vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'};
+  if(!window.gamesTypeFilter)window.gamesTypeFilter='all';
+  const gf=window.gamesTypeFilter;
+  const gs=gf==='all'?allGsV:allGsV.filter(g=>(g.gameType||'vjbl')===gf);
+  let h='<div class="card"><div class="sec-h">Season game log</div>';
+  h+='<div class="filters" style="margin-bottom:12px;"><label class="flt">Game type<select onchange="window.gamesTypeFilter=this.value;render();">';
+  gTypeOpts.forEach(t=>{ h+='<option value="'+t+'"'+(gf===t?' selected':'')+'>'+gTypeLbls[t]+'</option>'; });
+  h+='</select></label></div>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Type</th><th>Date</th><th>Result</th><th style="text-align:left;padding-left:14px;">Periods</th><th>FG</th><th>TOV</th><th>REB</th></tr></thead><tbody>';
   gs.forEach(g=>{
     const gid=String(g.id),open=expandedGame===gid;
-    h+='<tr class="clickable" onclick="toggleGame(\''+gid+'\')"><td>'+gLabel(g)+'</td><td style="color:var(--muted);">'+(g.date||'')+'</td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td><td>'+g._tot.fgm+'/'+g._tot.fga+' ('+pct(g._tot.fgm,g._tot.fga)+')</td><td>'+g._tot.tov+'</td><td>'+g._tot.reb+'</td></tr>';
-    if(open)h+='<tr class="gm-detail"><td colspan="7">'+boxScore(d,g)+'</td></tr>';
+    h+='<tr class="clickable" onclick="toggleGame(\''+gid+'\')"><td>'+gLabel(g)+\'</td><td>\'+gameTypeBadge(g)+\'</td><td style="color:var(--muted);">\'+(g.date||'')+'</td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td><td>'+g._tot.fgm+'/'+g._tot.fga+' ('+pct(g._tot.fgm,g._tot.fga)+')</td><td>'+g._tot.tov+'</td><td>'+g._tot.reb+'</td></tr>';
+    if(open)h+='<tr class="gm-detail"><td colspan="8">'+boxScore(d,g)+'</td></tr>';
   });
   return h+'</tbody></table></div></div>';
 }
@@ -530,7 +607,7 @@ function renderTabs(){
   document.getElementById('team-tabs').innerHTML=TEAMS.map(t=>'<button class="team-tab'+(t.key===curTeam?' active':'')+'" onclick="switchTeam(\''+t.key+'\')">'+t.label+'</button>').join('');
   document.getElementById('view-tabs').innerHTML=VIEWS.map(v=>'<button class="view-tab'+(v.id===curView?' active':'')+'" onclick="switchView(\''+v.id+'\')">'+v.label+'</button>').join('');
 }
-function switchTeam(k){curTeam=k;selPlayer=null;expandedGame=null;expandedOppGame=null;shootFilters={game:'all',player:'all',q:'all',result:'all'};oppShootFilters={game:'all',q:'all',result:'all'};render(true);}
+function switchTeam(k){curTeam=k;selPlayer=null;expandedGame=null;expandedOppGame=null;activeGameType='all';shootFilters={game:'all',player:'all',q:'all',result:'all'};oppShootFilters={game:'all',q:'all',result:'all'};render(true);}
 function switchView(v){curView=v;render();}
 async function render(reload){
   renderTabs();
