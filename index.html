@@ -125,7 +125,7 @@ const TEAMS=[
 ];
 /* BUILD:ANALYTICS_CONFIG_END */
 
-const VIEWS=[{id:'overview',label:'Overview'},{id:'games',label:'Games'},{id:'players',label:'Players'},{id:'shooting',label:'Shooting'},{id:'opposition',label:'Opposition'}];
+const VIEWS=[{id:'overview',label:'Overview'},{id:'games',label:'Games'},{id:'players',label:'Players'},{id:'shooting',label:'Shooting'},{id:'opposition',label:'Opposition'},{id:'analytics',label:'Analytics'}];
 let curTeam=TEAMS[0].key, curView='overview', cache={}, selPlayer=null, expandedGame=null, expandedOppGame=null;
 let shootFilters={game:'all',player:'all',q:'all',result:'all'};
 let oppShootFilters={game:'all',q:'all',result:'all'};
@@ -162,6 +162,8 @@ async function loadTeam(teamKey){
   const games=rows.map(r=>{try{return typeof r.data==='string'?JSON.parse(r.data):r.data;}catch(e){return null;}})
     .filter(g=>g&&g.summary&&g.summary.stats)
     .sort((a,b)=>(a.id||0)-(b.id||0));
+  // Normalise legacy 'rep' gameType → 'vjbl'
+  games.forEach(g=>{ if(!g.gameType||g.gameType==='rep')g.gameType='vjbl'; });
   const data={team:t,games,names:buildNames(t,games)};
   games.forEach(g=>{g._q=quarterScores(g);g._tot=teamTotals(g,data.names);});
   cache[teamKey]=data;
@@ -415,16 +417,6 @@ function vOverview(d){
   h+='<div class="card"><div class="sec-h">Period momentum — '+filterLabel+'</div><table><thead><tr><th>Game</th><th>Type</th><th>Result</th><th style="text-align:left;padding-left:14px;">'+periodHeader+'</th></tr></thead><tbody>';
   gs.forEach(g=>{h+='<tr><td>'+gLabel(g)+'<span style="color:var(--muted);font-weight:400;"> · '+(g.date||'')+'</span></td><td>'+gameTypeBadge(g)+'</td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td></tr>';});
   h+='</tbody></table><div class="legend" style="margin-top:10px;"><span><i style="background:var(--win);"></i>Won period</span><span><i style="background:var(--loss);"></i>Lost period</span><span><i style="background:#9aa4b2;"></i>Level</span></div></div>';
-  h+='<div class="charts">';
-  h+='<div class="chart-card"><h4>Points for vs against</h4>'+barChart(gs,g=>g.scoreHome||0,g=>g.scoreAway||0,'#1a9e72','#d9413f')+'<div class="legend"><span><i style="background:#1a9e72;"></i>For</span><span><i style="background:#d9413f;"></i>Against</span></div></div>';
-  h+='<div class="chart-card"><h4>Field goal % by game</h4>'+barChart(gs,g=>g._tot.fga?Math.round(g._tot.fgm/g._tot.fga*100):0,null,'#2d6fb5',null,v=>v+'%')+'</div>';
-  h+='<div class="chart-card"><h4>Turnovers by game</h4>'+barChart(gs,g=>g._tot.tov,null,'#c87d1a')+'</div>';
-  h+='<div class="chart-card"><h4>Rebounds by game</h4>'+barChart(gs,g=>g._tot.reb,null,'#5a6472')+'</div>';
-  h+='<div class="chart-card"><h4>Assists by game</h4>'+barChart(gs,g=>g._tot.ast,null,'#1a9e72')+'</div>';
-  h+='<div class="chart-card"><h4>Steals vs blocks by game</h4>'+barChart(gs,g=>g._tot.stl,g=>g._tot.blk,'#2d6fb5','#8a5cc7')+'<div class="legend"><span><i style="background:#2d6fb5;"></i>Steals</span><span><i style="background:#8a5cc7;"></i>Blocks</span></div></div>';
-  h+='<div class="chart-card"><h4>Team fouls by game</h4>'+barChart(gs,g=>g._tot.foul,null,'#d9413f')+'</div>';
-    +'<div class="chart-card"><h4>3PT attempts vs makes</h4>'+barChart(gs,g=>g._tot.fga3,g=>g._tot.fgm3,'#e3ddd0','#c87d1a')+'<div class="legend"><span><i style="background:#e3ddd0;"></i>Attempts</span><span><i style="background:#c87d1a;"></i>Makes</span></div></div>'
-    +'</div>';
   return h;
 }
 
@@ -601,6 +593,24 @@ function vOpposition(d){
   return h;
 }
 function toggleOppGame(gid){expandedOppGame=expandedOppGame===gid?null:gid;render();}
+function vAnalytics(d){
+  const gs=filteredGames(d.games);
+  if(!gs.length)return'<div class="card"><div class="loading">No games to analyse for this filter.</div></div>';
+  const filterLabel=activeGameType==='all'?'All games':{vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'}[activeGameType]+' games';
+  let h='<div class="card"><div class="sec-h">Season trends — '+filterLabel+' ('+gs.length+' game'+(gs.length===1?'':'s')+')</div>';
+  h+='<div class="charts">';
+  h+='<div class="chart-card"><h4>Points for vs against</h4>'+barChart(gs,g=>g.scoreHome||0,g=>g.scoreAway||0,'#1a9e72','#d9413f')+'<div class="legend"><span><i style="background:#1a9e72;"></i>For</span><span><i style="background:#d9413f;"></i>Against</span></div></div>';
+  h+='<div class="chart-card"><h4>Field goal % by game</h4>'+barChart(gs,g=>g._tot.fga?Math.round(g._tot.fgm/g._tot.fga*100):0,null,'#2d6fb5',null,v=>v+'%')+'</div>';
+  h+='<div class="chart-card"><h4>Turnovers by game</h4>'+barChart(gs,g=>g._tot.tov,null,'#c87d1a')+'</div>';
+  h+='<div class="chart-card"><h4>Rebounds by game</h4>'+barChart(gs,g=>g._tot.reb,null,'#5a6472')+'</div>';
+  h+='<div class="chart-card"><h4>Assists by game</h4>'+barChart(gs,g=>g._tot.ast,null,'#1a9e72')+'</div>';
+  h+='<div class="chart-card"><h4>Steals vs blocks by game</h4>'+barChart(gs,g=>g._tot.stl,g=>g._tot.blk,'#2d6fb5','#8a5cc7')+'<div class="legend"><span><i style="background:#2d6fb5;"></i>Steals</span><span><i style="background:#8a5cc7;"></i>Blocks</span></div></div>';
+  h+='<div class="chart-card"><h4>Team fouls by game</h4>'+barChart(gs,g=>g._tot.foul,null,'#d9413f')+'</div>';
+  h+='<div class="chart-card"><h4>3PT attempts vs makes</h4>'+barChart(gs,g=>g._tot.fga3,g=>g._tot.fgm3,'#e3ddd0','#c87d1a')+'<div class="legend"><span><i style="background:#e3ddd0;"></i>Attempts</span><span><i style="background:#c87d1a;"></i>Makes</span></div></div>';
+  h+='<div class="chart-card"><h4>FT attempts vs makes</h4>'+barChart(gs,g=>g._tot.fta,g=>g._tot.ftm,'#e3ddd0','#2d6fb5')+'<div class="legend"><span><i style="background:#e3ddd0;"></i>Attempts</span><span><i style="background:#2d6fb5;"></i>Makes</span></div></div>';
+  h+='</div></div>';
+  return h;
+}
 
 /* ── shell ── */
 function renderTabs(){
@@ -621,6 +631,7 @@ async function render(reload){
     else if(curView==='games')h+=vGames(d);
     else if(curView==='players')h+=vPlayers(d);
     else if(curView==='shooting')h+=vShooting(d);
+    else if(curView==='analytics')h+=vAnalytics(d);
     else h+=vOpposition(d);
     main.innerHTML=h;
   }catch(e){
