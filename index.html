@@ -443,7 +443,7 @@ function vGames(d){
   h+='<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Type</th><th>Date</th><th>Result</th><th style="text-align:left;padding-left:14px;">Periods</th><th>FG</th><th>TOV</th><th>REB</th></tr></thead><tbody>';
   gs.forEach(g=>{
     const gid=String(g.id),open=expandedGame===gid;
-    h+='<tr class="clickable" onclick="toggleGame(\''+gid+'\')"><td>'+gLabel(g)+\'</td><td>\'+gameTypeBadge(g)+\'</td><td style="color:var(--muted);">\'+(g.date||'')+'</td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td><td>'+g._tot.fgm+'/'+g._tot.fga+' ('+pct(g._tot.fgm,g._tot.fga)+')</td><td>'+g._tot.tov+'</td><td>'+g._tot.reb+'</td></tr>';
+    h+='<tr class="clickable" onclick="toggleGame(\''+gid+'\')"><td>'+gLabel(g)+'</td><td>'+gameTypeBadge(g)+'</td><td style="color:var(--muted);">'+(g.date||'')+'</td><td>'+resBadge(g)+'</td><td style="text-align:left;padding-left:14px;">'+qstrip(g)+'</td><td>'+g._tot.fgm+'/'+g._tot.fga+' ('+pct(g._tot.fgm,g._tot.fga)+')</td><td>'+g._tot.tov+'</td><td>'+g._tot.reb+'</td></tr>';
     if(open)h+='<tr class="gm-detail"><td colspan="8">'+boxScore(d,g)+'</td></tr>';
   });
   return h+'</tbody></table></div></div>';
