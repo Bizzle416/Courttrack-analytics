@@ -500,7 +500,8 @@ function barChart(games,fn,fn2,c1,c2,fmt){
       const h2=Math.max(2,vals2[i]/max*(H-18));
       s+='<rect x="'+(gx+1)+'" y="'+(H-h2)+'" width="'+bw+'" height="'+h2+'" rx="3" fill="'+c2+'"><title>'+gLabel(g)+': '+(fmt?fmt(vals2[i]):vals2[i])+'</title></rect>';
     }
-    s+='<text x="'+gx+'" y="'+(H+14)+'" text-anchor="middle" font-size="9" fill="#9aa4b2">'+(g.opponent||'?').substring(0,6)+'</text>';
+    const lbl=g.round?('R'+g.round):(g.opponent||'?').substring(0,4);
+    s+='<text x="'+gx+'" y="'+(H+16)+'" text-anchor="middle" font-size="8" fill="#9aa4b2">'+lbl+'</text>';
     s+='<text x="'+(fn2?gx-bw/2-1:gx)+'" y="'+(H-h1-4)+'" text-anchor="middle" font-size="10" font-weight="600" fill="#5a6472">'+(fmt?fmt(vals[i]):vals[i])+'</text>';
   });
   return s+'</svg>';
@@ -737,7 +738,11 @@ function vShooting(d){
   if(f.player!=='all')shots=shots.filter(s=>String(s.player_id)===f.player);
   if(f.q!=='all')shots=shots.filter(s=>String(s.period)===f.q);
   if(f.result!=='all')shots=shots.filter(s=>f.result==='made'?s.made:!s.made);
-  const players=[...new Set(d.games.flatMap(g=>homeShots(g).map(s=>s.player_id)))].filter(p=>p!=null);
+  const playerSet=new Map();
+  d.games.flatMap(g=>homeShots(g)).forEach(s=>{
+    if(s.player_id!=null){const k=String(s.player_id);if(!playerSet.has(k))playerSet.set(k,s.player_id);}
+  });
+  const players=[...playerSet.values()];
   let h='<div class="card"><div class="sec-h">Shot chart — aggregated across games</div><div class="filters">';
   h+='<label class="flt">Game<select onchange="shootFilters.game=this.value;render();"><option value="all"'+(f.game==='all'?' selected':'')+'>All games</option>'+d.games.map(g=>'<option value="'+g.id+'"'+(f.game===String(g.id)?' selected':'')+'>'+gLabel(g)+'</option>').join('')+'</select></label>';
   h+='<label class="flt">Player<select onchange="shootFilters.player=this.value;render();"><option value="all"'+(f.player==='all'?' selected':'')+'>All players</option>'+players.map(p=>'<option value="'+p+'"'+(f.player===String(p)?' selected':'')+'>'+pname(d.names,p)+'</option>').join('')+'</select></label>';
