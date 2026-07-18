@@ -179,6 +179,16 @@ label.flt{font-size:11px;font-weight:600;color:var(--muted);display:flex;flex-di
 .adv-toggle:hover{color:var(--ink);}
 .adv-content{display:none;margin-top:12px;}
 .adv-content.open{display:block;}
+/* ── PARENT GAME EXPAND ── */
+.pgm-expand{background:#f8f7f4;border-top:1px solid var(--line2);}
+.pgm-expand>td{padding:18px 14px 20px;}
+.pgm-stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:16px;}
+.pgm-stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:11px 13px;}
+.pgm-stat .sv{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:700;color:var(--ink);line-height:1;}
+.pgm-stat .sl{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:4px;}
+.pgm-stat.s-green .sv{color:var(--win);}
+.pgm-stat.s-amber .sv{color:var(--amber);}
+.pgm-stat.s-loss .sv{color:var(--loss);}
 /* ── NOTICE ── */
 .notice{padding:12px 16px;background:#fef9ec;border:1px solid #edd9a3;border-radius:8px;font-size:13px;color:#7a5500;margin-bottom:16px;line-height:1.5;}
 footer{max-width:1140px;margin:0 auto;padding:0 24px 40px;font-size:12px;color:var(--subtle);}
@@ -259,7 +269,7 @@ document.querySelector('.hd-logo').insertAdjacentHTML('afterend',
 
 let curTeam=TEAMS[0].key;
 let curView=IS_COACH?'overview':'players';
-let cache={},selPlayer=null,expandedGame=null,expandedOppGame=null;
+let cache={},selPlayer=null,expandedGame=null,expandedOppGame=null,expandedParentGame=null;
 let shootFilters={game:'all',player:'all',q:'all',result:'all'};
 let oppShootFilters={game:'all',q:'all',result:'all'};
 let activeGameType='all';
@@ -430,13 +440,27 @@ function playerRole(a,allPlayers){
   if(minPG>=(avgMin*0.55))return'Key rotation player';
   return'Developing rotation player';
 }
+function rollingAvg(vals,n){
+  // Returns array of n-game rolling averages (centred on last n games)
+  const out=[];
+  for(let i=0;i<vals.length;i++){
+    const start=Math.max(0,i-n+1);
+    const slice=vals.slice(start,i+1);
+    out.push(slice.reduce((s,v)=>s+v,0)/slice.length);
+  }
+  return out;
+}
 function trendBadge(vals){
+  // Need at least 4 games to say anything meaningful
   if(vals.length<4)return'';
-  const mid=Math.floor(vals.length/2);
-  const first=vals.slice(0,mid).reduce((s,v)=>s+v,0)/mid;
-  const second=vals.slice(mid).reduce((s,v)=>s+v,0)/(vals.length-mid);
-  if(second>first*1.1)return'<span class="trend-badge trend-up">▲ improving</span>';
-  if(second<first*0.9)return'<span class="trend-badge trend-down">▼ declining</span>';
+  // Compare 3-game rolling avg of latest game vs 3-game rolling avg of earliest window
+  const ra=rollingAvg(vals,3);
+  const early=ra[2]; // 3-game avg ending at game 3
+  const late=ra[ra.length-1]; // 3-game avg ending at most recent game
+  if(early===0&&late===0)return'<span class="trend-badge trend-flat">— steady</span>';
+  const base=Math.max(early,0.5); // avoid div/0 on zero-base stats
+  if(late>early+0.5&&late>base*1.12)return'<span class="trend-badge trend-up">▲ trending up</span>';
+  if(late<early-0.5&&late<base*0.88)return'<span class="trend-badge trend-down">▼ trending down</span>';
   return'<span class="trend-badge trend-flat">— steady</span>';
 }
 function playerSummary(a,allPlayers,data,pid){
@@ -466,7 +490,10 @@ function playerSummary(a,allPlayers,data,pid){
   if(top2.length>=2)s+='She ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+' and <strong>'+ordinal(top2[1].r)+'</strong> in '+top2[1].label+'.';
   else if(top2.length===1)s+='She ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+'.';
   if(ptsTrend||minTrend){
-    s+=' Over the season: scoring is '+ptsTrend.replace(/<[^>]+>/g,'')+', minutes are '+minTrend.replace(/<[^>]+>/g,'')+'.';
+    // strip HTML tags for inline plain-text use in the summary sentence
+    const ptsTrendTxt=ptsTrend.replace(/<[^>]+>/g,'').replace(/[▲▼—]\s*/,'').trim();
+    const minTrendTxt=minTrend.replace(/<[^>]+>/g,'').replace(/[▲▼—]\s*/,'').trim();
+    s+=' Based on her 3-game rolling average: scoring is <strong>'+ptsTrendTxt+'</strong>, minutes are <strong>'+minTrendTxt+'</strong>.';
   }
   return s;
 }
@@ -683,6 +710,7 @@ function boxScore(d,g){
   return h;
 }
 function toggleGame(gid){expandedGame=expandedGame===gid?null:gid;render();}
+function toggleParentGame(gid){expandedParentGame=expandedParentGame===gid?null:gid;render();}
 
 /* ════════════════════════════════════════
    COACH-ONLY VIEWS
@@ -697,7 +725,7 @@ function vPlayersCoach(d){
   });
   return h+'</tbody></table></div></div>';
 }
-function openPlayer(pid){selPlayer=pid;render();}
+function openPlayer(pid){selPlayer=pid;expandedParentGame=null;render();}
 function playerPanelCoach(d,pid){
   const a=seasonPlayers(d).find(x=>x.pid===pid);
   if(!a)return'<div class="card">Player not found.</div>';
@@ -873,15 +901,21 @@ function playerPanelParent(d,pid){
   const ptsTrend=trendBadge(ptsVals);
   const minTrend=trendBadge(minVals);
   const summary=playerSummary(a,allPlayers,d,pid);
-  const pergame=d.games.map(g=>({g,s:g.summary.stats[pid]||{},m:g.summary.minutes[pid]||0}));
-  const shots=d.games.flatMap(g=>homeShots(g).filter(s=>s.player_id===pid));
+  // Sort games by round ascending for chronological display
+  const sortedGames=d.games.slice().sort((ga,gb)=>{
+    const ra=ga.round!=null?+ga.round:9999;
+    const rb=gb.round!=null?+gb.round:9999;
+    return ra-rb;
+  });
+  const pergame=sortedGames.map(g=>({g,s:g.summary.stats[pid]||{},m:g.summary.minutes[pid]||0}));
+  const shots=d.games.flatMap(g=>homeShots(g).filter(s=>s.player_id===+pid));
   let h='<button class="back-btn" onclick="selPlayer=null;render();">← All players</button>';
   h+='<div class="p-player-card">';
   h+='<div style="display:flex;align-items:baseline;gap:8px;">';
   h+='<span class="p-player-num">'+num+'</span>';
   h+='<span class="p-player-name">'+name+'</span>';
   h+='</div>';
-  h+='<div class="p-player-team">'+d.team.full+'  ·  '+a.gp+' game'+(a.gp===1?'':'s')+' played</div>';
+  h+='<div class="p-player-team">'+d.team.full+'  ·  '+a.gp+' game'+(a.gp===1?'':' s')+' played</div>';
   h+='<div class="p-role-badge">'+role+'</div>';
   h+='<div class="p-summary">'+summary+'</div>';
   h+='</div>';
@@ -893,29 +927,41 @@ function playerPanelParent(d,pid){
   h+='<div class="p-tile"><div class="v disp">'+(a.gp>0?(a.ast/a.gp).toFixed(1):'—')+'</div><div class="l">Assists / game</div></div>';
   h+='<div class="p-tile t-amber"><div class="v disp">'+(a.gp>0?(a.tov/a.gp).toFixed(1):'—')+'</div><div class="l">Turnovers / game</div></div>';
   h+='</div>';
+  // Season development — 6 charts in round order
   h+='<div class="card"><div class="sec-h">Season development</div>';
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">';
-  h+='<div class="chart-card"><h4>Minutes per game</h4>'+barChart(d.games,g=>+(g.summary.minutes[pid]||0).toFixed(1),null,'#5a6472')+'</div>';
-  h+='<div class="chart-card"><h4>Points per game</h4>'+barChart(d.games,g=>(g.summary.stats[pid]||{}).pts||0,null,'#1a9e72')+'</div>';
-  h+='<div class="chart-card"><h4>Rebounds per game</h4>'+barChart(d.games,g=>{const ss=g.summary.stats[pid]||{};return(ss.oreb||0)+(ss.dreb||0);},null,'#2d6fb5')+'</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">';
+  h+='<div class="chart-card"><h4>Minutes per game</h4>'+barChart(sortedGames,g=>+(g.summary.minutes[pid]||0).toFixed(1),null,'#5a6472')+'</div>';
+  h+='<div class="chart-card"><h4>Points per game</h4>'+barChart(sortedGames,g=>(g.summary.stats[pid]||{}).pts||0,null,'#1a9e72')+'</div>';
+  h+='<div class="chart-card"><h4>Rebounds per game</h4>'+barChart(sortedGames,g=>{const ss=g.summary.stats[pid]||{};return(ss.oreb||0)+(ss.dreb||0);},null,'#2d6fb5')+'</div>';
+  h+='<div class="chart-card"><h4>Assists per game</h4>'+barChart(sortedGames,g=>(g.summary.stats[pid]||{}).ast||0,null,'#7c4dcc')+'</div>';
+  h+='<div class="chart-card"><h4>Turnovers per game</h4>'+barChart(sortedGames,g=>(g.summary.stats[pid]||{}).tov||0,null,'#c87d1a')+'</div>';
+  h+='<div class="chart-card"><h4>Fouls per game</h4>'+barChart(sortedGames,g=>(g.summary.stats[pid]||{}).foul||0,null,'#d9413f')+'</div>';
   h+='</div></div>';
-  h+='<div class="card"><div class="sec-h">Game by game</div>';
-  h+='<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Result</th><th>Min</th><th>Pts</th><th>Reb</th><th>Ast</th></tr></thead><tbody>';
+  // Game by game — sorted by round, expandable rows
+  h+='<div class="card"><div class="sec-h">Game by game &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">tap any game for full stats &amp; shot chart</span></div>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Result</th><th>Min</th><th>Pts</th><th>Reb</th><th>Ast</th><th></th></tr></thead><tbody>';
   pergame.forEach(r=>{
+    const gid=String(r.g.id);
+    const open=expandedParentGame===gid;
     const bench=r.m<1;
-    const style=bench?'color:var(--muted)':'';
-    h+='<tr>';
+    const minStyle=bench?'color:var(--muted)':'';
+    h+='<tr class="clickable" onclick="toggleParentGame(\''+gid+'\')" style="'+(open?'background:var(--card2);':'')+ '">';
     h+='<td>'+gLabel(r.g)+(bench?' <span class="bench-note">(limited mins)</span>':'')+'</td>';
     h+='<td>'+resBadge(r.g)+'</td>';
-    h+='<td style="'+style+'">'+fmtMin(r.m)+'</td>';
+    h+='<td style="'+minStyle+'">'+fmtMin(r.m)+'</td>';
     h+='<td><strong>'+(r.s.pts||0)+'</strong></td>';
-    h+='<td>'+((r.s.oreb||0)+(r.s.dreb||0))+'</td>';
+    h+='<td>'+ ((r.s.oreb||0)+(r.s.dreb||0))+'</td>';
     h+='<td>'+(r.s.ast||0)+'</td>';
+    h+='<td style="color:var(--subtle);font-size:11px;text-align:center;">'+(open?'▲':'▼')+'</td>';
     h+='</tr>';
+    if(open){
+      h+='<tr class="pgm-expand"><td colspan="7">'+parentGameExpand(d,pid,r.g)+'</td></tr>';
+    }
   });
   h+='</tbody></table></div></div>';
+  // Season-wide shot chart
   if(shots.length){
-    h+='<div class="card"><div class="sec-h">Where she scores</div>';
+    h+='<div class="card"><div class="sec-h">Where she scores — all season</div>';
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">';
     h+='<div class="court-wrap">'+courtSVG(shots);
     h+='<div class="legend" style="margin-top:8px;">';
@@ -929,7 +975,7 @@ function playerPanelParent(d,pid){
   h+='<button class="adv-toggle" onclick="toggleAdv(this)">Advanced stats <span>▼ Show</span></button>';
   h+='<div class="adv-content">';
   h+='<div style="font-size:13px;color:var(--ink2);margin-top:8px;margin-bottom:12px;">';
-  h+='Per-40 min rates  ·  Pts '+per40(a.pts,a.min);
+  h+='Per-40 min rates  ·  Pts '+per40(a.pts,a.min);
   h+=' · Reb '+per40(a.oreb+a.dreb,a.min);
   h+=' · Ast '+per40(a.ast,a.min);
   h+=' · Stl '+per40(a.stl,a.min);
@@ -941,6 +987,41 @@ function playerPanelParent(d,pid){
   h+='</div></div>';
   return h;
 }
+
+function parentGameExpand(d,pid,g){
+  const s=g.summary.stats[pid]||{};
+  const m=g.summary.minutes[pid]||0;
+  const reb=(s.oreb||0)+(s.dreb||0);
+  const fg=(s.fga||0)?(s.fgm||0)+'/'+(s.fga||0)+' ('+pct(s.fgm||0,s.fga||0)+')':'—';
+  const tp=(s.fga3||0)?(s.fgm3||0)+'/'+(s.fga3||0):'—';
+  const ft=(s.fta||0)?(s.ftm||0)+'/'+(s.fta||0):'—';
+  let h='<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:12px;">'+gLabel(g)+' — '+pname(d.names,pid)+'\'s game</div>';
+  h+='<div class="pgm-stat-grid">';
+  h+='<div class="pgm-stat"><div class="sv">'+(s.pts||0)+'</div><div class="sl">Points</div></div>';
+  h+='<div class="pgm-stat"><div class="sv">'+fmtMin(m)+'</div><div class="sl">Minutes</div></div>';
+  h+='<div class="pgm-stat"><div class="sv">'+reb+'</div><div class="sl">Rebounds</div></div>';
+  h+='<div class="pgm-stat s-green"><div class="sv">'+(s.ast||0)+'</div><div class="sl">Assists</div></div>';
+  h+='<div class="pgm-stat s-green"><div class="sv">'+(s.stl||0)+'</div><div class="sl">Steals</div></div>';
+  h+='<div class="pgm-stat s-amber"><div class="sv">'+(s.tov||0)+'</div><div class="sl">Turnovers</div></div>';
+  h+='<div class="pgm-stat s-amber"><div class="sv">'+(s.foul||0)+'</div><div class="sl">Fouls</div></div>';
+  h+='<div class="pgm-stat"><div class="sv" style="font-size:18px;padding-top:4px;">'+fg+'</div><div class="sl">Field goals</div></div>';
+  h+='<div class="pgm-stat"><div class="sv" style="font-size:18px;padding-top:4px;">'+tp+'</div><div class="sl">3-pointers</div></div>';
+  h+='<div class="pgm-stat"><div class="sv" style="font-size:18px;padding-top:4px;">'+ft+'</div><div class="sl">Free throws</div></div>';
+  h+='</div>';
+  const gamePid=+pid;
+  const gameShots=homeShots(g).filter(s=>s.player_id===gamePid);
+  if(gameShots.length){
+    h+='<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px;">Shot chart — this game</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">';
+    h+='<div class="court-wrap">'+courtSVG(gameShots)+'<div class="legend" style="margin-top:8px;"><span><i style="background:#1a9e72;border-radius:50%;"></i>Made</span><span><i style="background:#d9413f;"></i>Missed</span></div></div>';
+    h+='<div>'+zoneTable(gameShots)+'</div>';
+    h+='</div>';
+  }else{
+    h+='<div style="font-size:12px;color:var(--muted);margin-top:8px;">No shot coordinates logged for this game.</div>';
+  }
+  return h;
+}
+
 
 
 function toggleAdv(btn){
@@ -957,7 +1038,7 @@ function renderTabs(){
   }).join('');
 }
 function switchTeam(k){
-  curTeam=k;selPlayer=null;expandedGame=null;expandedOppGame=null;
+  curTeam=k;selPlayer=null;expandedGame=null;expandedOppGame=null;expandedParentGame=null;
   activeGameType='all';window.gamesTypeFilter='all';
   shootFilters={game:'all',player:'all',q:'all',result:'all'};
   oppShootFilters={game:'all',q:'all',result:'all'};
