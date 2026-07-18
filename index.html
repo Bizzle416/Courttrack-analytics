@@ -236,11 +236,11 @@ footer{max-width:1140px;margin:0 auto;padding:0 24px 40px;font-size:12px;color:v
 const SB_URL='https://uenxuzczcwtmiuzbnoxk.supabase.co';
 const SB_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlbnh1emN6Y3d0bWl1emJub3hrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MTkwMzUsImV4cCI6MjA5OTI5NTAzNX0.rsSJOZDPI7gBw6FeC7WPLwUeIZue2OD8yy8pZvz6xdY';
 const TEAMS=[
-  {key:'eltham_u12_girls1',aliases:[],label:'Eltham 12.1',full:'Eltham Wildcats U12 Girls 1',comp:'VC Reserve · 7-min stop clock',
+  {key:'eltham_u12_girls1',aliases:[],label:'Eltham 12.1',full:'Eltham Wildcats U12 Girls 1',comp:'VC Reserve · 7-min stop clock',gender:'f',
    roster:{5:{num:'#5',name:'Chloe Connelley'},6:{num:'#6',name:'Lily Collett'},9:{num:'#9',name:'Indiana Sage'},11:{num:'#11',name:'Imogen Wynd'},12:{num:'#12',name:'Kiara Carlson'},14:{num:'#14',name:'Holly Bannister'},18:{num:'#18',name:'Annabelle Liu'},24:{num:'#24',name:'Olivia Oppedisano'},41:{num:'#41',name:'Samantha Neal'},43:{num:'#43',name:'Annabella Buncic'}}},
-  {key:'dv_u12_girls1',aliases:[],label:'Diamond Valley',full:'Diamond Valley U12 Girls 1',comp:'VC Reserve · 7-min stop clock',
+  {key:'dv_u12_girls1',aliases:[],label:'Diamond Valley',full:'Diamond Valley U12 Girls 1',comp:'VC Reserve · 7-min stop clock',gender:'f',
    roster:{19:{num:'#19',name:'Kaiah Black'},31:{num:'#31',name:'Scarlett Walters'},41:{num:'#41',name:'Harper Powell'},43:{num:'#43',name:'Harper Ritchie'},45:{num:'#45',name:'Mila Dixon'},53:{num:'#53',name:'Greta Morris'},55:{num:'#55',name:'Lara Shaw'},73:{num:'#73',name:'Mackenzie Haas-Baker'},75:{num:'#75',name:'Taylah Wignell'},77:{num:'#77',name:'Billie Burrell'}}},
-  {key:'eltham_u12_girls2',aliases:['eltham_u12_wildcats','eltham_wildcats_u12_girls_2','eltham_wildcats_12_2_girls'],label:'Eltham 12.2',full:'Eltham Wildcats U12 Girls 2',comp:'Grading · 10-min running clock',
+  {key:'eltham_u12_girls2',aliases:['eltham_u12_wildcats','eltham_wildcats_u12_girls_2','eltham_wildcats_12_2_girls'],label:'Eltham 12.2',full:'Eltham Wildcats U12 Girls 2',comp:'Grading · 10-min running clock',gender:'f',
    roster:{4:{num:'#4',name:'Elara Jewell'},6:{num:'#6',name:'Grace Burslem'},8:{num:'#8',name:'Evie Davis'},10:{num:'#10',name:'Quinn Cukier'},13:{num:'#13',name:'Emilia Wynne'},15:{num:'#15',name:'Madeline Hadley'},21:{num:'#21',name:'Ellie Spithill'},22:{num:'#22',name:'Harper Bolton'},23:{num:'#23',name:"Zoe O'Connell"},33:{num:'#33',name:'Eva Leverton'}}}
 ];
 /* BUILD:ANALYTICS_CONFIG_END */
@@ -425,6 +425,25 @@ function filteredGames(games){
   return games.filter(g=>(g.gameType||'vjbl')===activeGameType);
 }
 
+/* ── pronoun helper ──
+   gender field on team config: 'f' = she/her, 'm' = he/his, omitted/anything else = they/their
+   Usage: pronoun(d,'subject') → 'She'/'He'/'They'
+          pronoun(d,'object')  → 'Her'/'Him'/'Them'
+          pronoun(d,'pos')     → 'Her'/'His'/'Their'
+          pronoun(d,'refl')    → 'Herself'/'Himself'/'Themselves'
+          pass lowercase:true as third arg for lowercase version */
+function pronoun(d,type,opts){
+  const g=(d&&d.team&&d.team.gender)||'n';
+  const map={
+    f:{subject:'She',object:'Her',pos:'Her',refl:'Herself'},
+    m:{subject:'He',object:'Him',pos:'His',refl:'Himself'},
+    n:{subject:'They',object:'Them',pos:'Their',refl:'Themselves'}
+  };
+  const row=map[g]||map.n;
+  const val=row[type]||row.subject;
+  return(opts&&opts.lowercase)?val.toLowerCase():val;
+}
+
 /* ── parent player helpers ── */
 function playerRole(a,allPlayers){
   const n=allPlayers.length||1;
@@ -438,7 +457,7 @@ function playerRole(a,allPlayers){
   if(ptsRank<=2&&a.pts>0)return'Primary scorer';
   if(stlRank===1&&a.stl>0)return'Defensive anchor';
   if(minPG>=(avgMin*0.55))return'Key rotation player';
-  return'Developing rotation player';
+  return'Rotation player';
 }
 function rollingAvg(vals,n){
   // Returns array of n-game rolling averages (centred on last n games)
@@ -486,14 +505,15 @@ function playerSummary(a,allPlayers,data,pid){
   const minVals=data.games.map(g=>g.summary.minutes[pid]||0);
   const ptsTrend=trendBadge(ptsVals);
   const minTrend=trendBadge(minVals);
+  const sub=pronoun(data,'subject');
+  const pos=pronoun(data,'pos',{lowercase:true});
   let s='<strong>'+pname(data.names,pid)+'</strong> averages <strong>'+minPG+' min/game</strong> and <strong>'+ptsPG+' points/game</strong> across '+a.gp+' game'+(a.gp===1?'':'s')+'. ';
-  if(top2.length>=2)s+='She ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+' and <strong>'+ordinal(top2[1].r)+'</strong> in '+top2[1].label+'.';
-  else if(top2.length===1)s+='She ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+'.';
+  if(top2.length>=2)s+=sub+' ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+' and <strong>'+ordinal(top2[1].r)+'</strong> in '+top2[1].label+'.';
+  else if(top2.length===1)s+=sub+' ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+'.';
   if(ptsTrend||minTrend){
-    // strip HTML tags for inline plain-text use in the summary sentence
     const ptsTrendTxt=ptsTrend.replace(/<[^>]+>/g,'').replace(/[▲▼—]\s*/,'').trim();
     const minTrendTxt=minTrend.replace(/<[^>]+>/g,'').replace(/[▲▼—]\s*/,'').trim();
-    s+=' Based on her 3-game rolling average: scoring is <strong>'+ptsTrendTxt+'</strong>, minutes are <strong>'+minTrendTxt+'</strong>.';
+    s+=' Based on '+pos+' 3-game rolling average: scoring is <strong>'+ptsTrendTxt+'</strong>, minutes are <strong>'+minTrendTxt+'</strong>.';
   }
   return s;
 }
@@ -961,7 +981,7 @@ function playerPanelParent(d,pid){
   h+='</tbody></table></div></div>';
   // Season-wide shot chart
   if(shots.length){
-    h+='<div class="card"><div class="sec-h">Where she scores — all season</div>';
+    h+='<div class="card"><div class="sec-h">Where '+pronoun(d,'subject',{lowercase:true})+' scores — all season</div>';
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">';
     h+='<div class="court-wrap">'+courtSVG(shots);
     h+='<div class="legend" style="margin-top:8px;">';
