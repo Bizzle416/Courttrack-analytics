@@ -448,7 +448,6 @@ function playerRole(a,allPlayers){
   return'Developing rotation player';
 }
 function rollingAvg(vals,n){
-  // Returns array of n-game rolling averages (centred on last n games)
   const out=[];
   for(let i=0;i<vals.length;i++){
     const start=Math.max(0,i-n+1);
@@ -458,14 +457,12 @@ function rollingAvg(vals,n){
   return out;
 }
 function trendBadge(vals){
-  // Need at least 4 games to say anything meaningful
   if(vals.length<4)return'';
-  // Compare 3-game rolling avg of latest game vs 3-game rolling avg of earliest window
   const ra=rollingAvg(vals,3);
-  const early=ra[2]; // 3-game avg ending at game 3
-  const late=ra[ra.length-1]; // 3-game avg ending at most recent game
+  const early=ra[2];
+  const late=ra[ra.length-1];
   if(early===0&&late===0)return'<span class="trend-badge trend-flat">— steady</span>';
-  const base=Math.max(early,0.5); // avoid div/0 on zero-base stats
+  const base=Math.max(early,0.5);
   if(late>early+0.5&&late>base*1.12)return'<span class="trend-badge trend-up">▲ trending up</span>';
   if(late<early-0.5&&late<base*0.88)return'<span class="trend-badge trend-down">▼ trending down</span>';
   return'<span class="trend-badge trend-flat">— steady</span>';
@@ -497,10 +494,12 @@ function playerSummary(a,allPlayers,data,pid){
   if(top2.length>=2)s+='She ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+' and <strong>'+ordinal(top2[1].r)+'</strong> in '+top2[1].label+'.';
   else if(top2.length===1)s+='She ranks <strong>'+ordinal(top2[0].r)+'</strong> on the team in '+top2[0].label+'.';
   if(ptsTrend||minTrend){
-    // strip HTML tags for inline plain-text use in the summary sentence
     const ptsTrendTxt=ptsTrend.replace(/<[^>]+>/g,'').replace(/[▲▼—]\s*/,'').trim();
     const minTrendTxt=minTrend.replace(/<[^>]+>/g,'').replace(/[▲▼—]\s*/,'').trim();
-    s+=' Based on her 3-game rolling average: scoring is <strong>'+ptsTrendTxt+'</strong>, minutes are <strong>'+minTrendTxt+'</strong>.';
+    const pts5=metricArc(ptsVals,5),min5=metricArc(minVals,5);
+    const ptsConf=pts5&&metricArc(ptsVals,3)&&metricArc(ptsVals,3).dir===pts5.dir&&metricArc(ptsVals,3).dir!=='flat'?' (confirmed 5g)':'';
+    const minConf=min5&&metricArc(minVals,3)&&metricArc(minVals,3).dir===min5.dir&&metricArc(minVals,3).dir!=='flat'?' (confirmed 5g)':'';
+    s+=' 3-game trend: scoring <strong>'+ptsTrendTxt+ptsConf+'</strong>, minutes <strong>'+minTrendTxt+minConf+'</strong>.';
   }
   return s;
 }
@@ -560,26 +559,40 @@ function lineChart(games,fn,color,fmt){
   games.forEach((g,i)=>{if(n>8&&i%2!==0&&i!==n-1)return;s+='<text x="'+xOf(i)+'" y="'+(H+12)+'" text-anchor="middle" font-size="8" fill="#9aa4b2">'+(g.round?'R'+g.round:(g.opponent||'?').substring(0,3))+'</text>';});
   return s+'</svg>';
 }
-/* metric arc: early vs late 3-game rolling avg */
-function metricArc(vals){
-  if(vals.length<4)return null;
-  const ra=rollingAvg(vals,3);
-  const early=ra[2],late=ra[ra.length-1];
+/* metric arc: early vs late n-game rolling avg */
+function metricArc(vals,n){
+  n=n||3;
+  if(vals.length<n+1)return null;
+  const ra=rollingAvg(vals,n);
+  const early=ra[n-1],late=ra[ra.length-1];
   const dir=late>early+0.3?'up':late<early-0.3?'down':'flat';
-  return{early:Math.round(early*10)/10,late:Math.round(late*10)/10,dir,delta:Math.round((late-early)*10)/10};
+  return{early:Math.round(early*10)/10,late:Math.round(late*10)/10,dir,delta:Math.round((late-early)*10)/10,n};
 }
-/* coach read — direct, fair */
+/* coach read — dual-window: 3-game short signal + 5-game confirmed trend */
 function coachRead(vals,label,goodDir,unit){
-  const a=metricArc(vals);
-  if(!a)return'<div class="arc-read"><span style="color:var(--muted);font-size:11.5px;">Need 4+ games for a trend read.</span></div>';
-  const good=goodDir>0?a.dir==='up':a.dir==='down';
-  const bad=goodDir>0?a.dir==='down':a.dir==='up';
-  const arrow=a.dir==='up'?'▲':a.dir==='down'?'▼':'—';
-  const cls=good?'trend-up':bad?'trend-down':'trend-flat';
-  const word=good?'improving':bad?'watch':'steady';
+  const a3=metricArc(vals,3);
+  const a5=metricArc(vals,5);
+  if(!a3)return'<div class="arc-read"><span style="color:var(--muted);font-size:11.5px;">Need 4+ games for a trend read.</span></div>';
   const u=unit||'';
-  const body=a.dir==='flat'?('holding around '+a.late+u):((a.dir==='up'?'up':'down')+' '+a.early+u+' → '+a.late+u+' (3-game avg)');
-  return'<div class="arc-read"><span class="trend-badge '+cls+'">'+arrow+' '+word+'</span> <span style="color:var(--ink2);font-size:11.5px;">'+body+'</span></div>';
+  const renderArc=(a,window)=>{
+    if(!a)return'';
+    const good=goodDir>0?a.dir==='up':a.dir==='down';
+    const bad=goodDir>0?a.dir==='down':a.dir==='up';
+    const arrow=a.dir==='up'?'▲':a.dir==='down'?'▼':'—';
+    const cls=good?'trend-up':bad?'trend-down':'trend-flat';
+    const word=good?'improving':bad?'watch':'steady';
+    const body=a.dir==='flat'?('~'+a.late+u):(a.early+u+' → '+a.late+u);
+    return'<span style="margin-right:10px;"><span class="trend-badge '+cls+'">'+arrow+' '+window+': '+word+'</span> <span style="color:var(--ink2);font-size:11px;">'+body+'</span></span>';
+  };
+  // Agreement signal: both point same direction = confirmed
+  let confirm='';
+  if(a5&&a3.dir===a5.dir&&a3.dir!=='flat'){
+    const good=goodDir>0?a3.dir==='up':a3.dir==='down';
+    confirm='<span style="font-size:11px;color:'+(good?'var(--windk)':'var(--lossdk)')+';">'+(good?'✓ confirmed across both windows':'⚠ sustained across both windows')+'</span>';
+  }else if(a5&&a3.dir!==a5.dir&&a3.dir!=='flat'){
+    confirm='<span style="font-size:11px;color:var(--muted);">Recent shift — not yet confirmed over 5 games</span>';
+  }
+  return'<div class="arc-read" style="flex-direction:column;align-items:flex-start;gap:3px;">'+renderArc(a3,'3g')+renderArc(a5,'5g')+(confirm?'<div>'+confirm+'</div>':'')+'</div>';
 }
 
 /* ── court SVG ── */
@@ -893,11 +906,30 @@ function oppTeamOnlyCard(g){
 }
 function toggleOppGame(gid){expandedOppGame=expandedOppGame===gid?null:gid;render();}
 
+/* ── game type filter bar for tabs that need it ── */
+function gameTypeFilterBar(allGs){
+  const types=['all','vjbl','domestic','tournament'];
+  const labels={all:'All games',vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'};
+  const activeCls={all:'active-all',vjbl:'active-vjbl',domestic:'active-dom',tournament:'active-tour'};
+  const counts={all:allGs.length};
+  ['vjbl','domestic','tournament'].forEach(t=>{counts[t]=allGs.filter(g=>(g.gameType||'vjbl')===t).length;});
+  let h='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">';
+  types.forEach(t=>{
+    if(t!=='all'&&counts[t]===0)return;
+    const active=activeGameType===t;
+    const cls='type-pill'+(active?' '+(activeCls[t]||'active-all'):'');
+    h+='<button class="'+cls+'" onclick="activeGameType=\''+t+'\';render();">'+labels[t]+' <span class="pill-rec">'+counts[t]+'</span></button>';
+  });
+  return h+'</div>';
+}
+
 function vAnalytics(d){
-  const gs=filteredGames(d.games);
-  if(!gs.length)return'<div class="card"><div class="loading">No games to analyse for this filter.</div></div>';
+  const allGsV=d.games;
+  const gs=filteredGames(allGsV);
   const filterLabel=activeGameType==='all'?'All games':{vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'}[activeGameType]+' games';
-  let h='<div class="card"><div class="sec-h">Season trends — '+filterLabel+' ('+gs.length+' game'+(gs.length===1?'':'s')+')</div><div class="charts">';
+  let h=gameTypeFilterBar(allGsV);
+  if(!gs.length)return h+'<div class="card"><div class="loading">No '+filterLabel.toLowerCase()+' logged yet.</div></div>';
+  h+='<div class="card"><div class="sec-h">Season trends — '+filterLabel+' ('+gs.length+' game'+(gs.length===1?'':'s')+')</div><div class="charts">';
   h+='<div class="chart-card"><h4>Points for vs against</h4>'+barChart(gs,g=>g.scoreHome||0,g=>g.scoreAway||0,'#1a9e72','#d9413f')+'<div class="legend"><span><i style="background:#1a9e72;"></i>For</span><span><i style="background:#d9413f;"></i>Against</span></div></div>';
   h+='<div class="chart-card"><h4>Field goal % by game</h4>'+barChart(gs,g=>g._tot.fga?Math.round(g._tot.fgm/g._tot.fga*100):0,null,'#2d6fb5',null,v=>v+'%')+'</div>';
   h+='<div class="chart-card"><h4>Turnovers by game</h4>'+barChart(gs,g=>g._tot.tov,null,'#d9a05b')+'</div>';
@@ -1075,57 +1107,84 @@ function toggleAdv(btn){
 
 /* ═══ COACH: SEASON PROGRESSION ═══ */
 function vProgressionCoach(d){
-  const gs=filteredGames(d.games);
-  const flabel=activeGameType==='all'?'all games':activeGameType.toUpperCase();
-  if(gs.length<2)return '<div class="card"><div class="sec-h">Season progression</div><div style="color:var(--muted);font-size:13px;padding:6px 0;">Progression needs at least 2 games'+(gs.length?' — only 1 in this filter':'')+'. Trend reads unlock at 4 games. Sync more games to see the arc.</div></div>';
+  const allGsV=d.games;
+  const gs=filteredGames(allGsV);
+  const flabel=activeGameType==='all'?'all games':{vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'}[activeGameType]+' games';
+  let h=gameTypeFilterBar(allGsV);
+  if(gs.length<2)return h+'<div class="card"><div class="sec-h">Season progression</div><div style="color:var(--muted);font-size:13px;padding:6px 0;">Need at least 2 '+flabel+' synced'+(gs.length===1?' — only 1 logged so far':'')+'. Trend reads unlock at 4 games.</div></div>';
   // cumulative record arc
-  let w=0,l=0,dr=0;const recSeq=gs.map(g=>{const diff=(g.scoreHome||0)-(g.scoreAway||0);if(diff>0)w++;else if(diff<0)l++;else dr++;return w-l;});
-  let h='';
-  h+='<div class="card"><div class="sec-h">Season progression &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">'+flabel+' · '+gs.length+' games · smoothed 3-game trend line</span></div>';
-  h+='<div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px;">Record now <strong>'+w+'–'+l+(dr?'–'+dr:'')+'</strong>. Each chart shows game-by-game dots with a smoothed line — the line\'s slope is the story. Reads compare the latest 3-game average against the early-season baseline.</div>';
-  h+='<div class="charts">';
+  let w=0,l=0,dr=0;gs.forEach(g=>{const diff=(g.scoreHome||0)-(g.scoreAway||0);if(diff>0)w++;else if(diff<0)l++;else dr++;});
+  const has5=(gs.length>=5);
+  const trendNote=has5?'3-game (short signal) + 5-game (confirmed trend)':'3-game trend line · 5-game window available at 6+ games';
+  let h2='<div class="card"><div class="sec-h">Season arc — '+flabel+' &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">'+gs.length+' games · '+trendNote+'</span></div>';
+  h2+='<div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px;">Record: <strong>'+w+'–'+l+(dr?'–'+dr:'')+'</strong>. Dots = individual games, line = rolling average. Where both 3g and 5g windows agree, the trend is real — treat single-window signals with caution.</div>';
+  h2+='<div class="charts">';
   const metrics=[
     ['Points for',g=>g._tot.pts,'#1a9e72',1,''],
-    ['Points against',g=>g._tot ? (oppTeamTotals(g).pts||g.scoreAway||0) : (g.scoreAway||0),'#d9413f',-1,''],
+    ['Points against',g=>g._tot?(oppTeamTotals(g).pts||g.scoreAway||0):(g.scoreAway||0),'#d9413f',-1,''],
     ['Field goal %',g=>g._tot.fga?Math.round(g._tot.fgm/g._tot.fga*100):0,'#2d6fb5',1,'%'],
     ['Turnovers',g=>g._tot.tov,'#c87d1a',-1,''],
-    ['Rebounds',g=>g._tot.reb,'#5a6472',1,''],
-    ['Assists',g=>g._tot.ast,'#7c4dcc',1,'']
+    ['Assists',g=>g._tot.ast,'#7c4dcc',1,''],
+    ['Rebounds',g=>g._tot.reb,'#5a6472',1,'']
   ];
   metrics.forEach(m=>{
     const vals=gs.map(m[1]);
-    h+='<div class="chart-card"><h4>'+m[0]+'</h4>'+lineChart(gs,m[1],m[2],m[4]==='%'?(v=>v+'%'):null)+coachRead(vals,m[0],m[3],m[4])+'</div>';
+    h2+='<div class="chart-card"><h4>'+m[0]+'</h4>'+lineChart(gs,m[1],m[2],m[4]==='%'?(v=>v+'%'):null)+coachRead(vals,m[0],m[3],m[4])+'</div>';
   });
-  h+='</div></div>';
-  // player movement
-  const sp=seasonPlayers(d).filter(a=>a.gp>=4);
+  h2+='</div></div>';
+  h+=h2;
+  // player movement — dual window (3g + 5g)
+  const sp=seasonPlayers(d).filter(a=>{
+    // count games played within the filtered set
+    const pgInFilter=gs.filter(g=>g.summary&&g.summary.minutes&&(g.summary.minutes[a.pid]||0)>0).length;
+    return pgInFilter>=4;
+  });
   if(sp.length){
-    const rising=[],monitor=[];
+    // Build per-player signal using filtered games
+    const entries=[];
     sp.forEach(a=>{
       const pid=a.pid;
-      const ptsA=metricArc(gs.map(g=>(g.summary.stats[pid]||{}).pts||0));
-      const minA=metricArc(gs.map(g=>+(g.summary.minutes[pid]||0).toFixed(1)));
-      const tovA=metricArc(gs.map(g=>(g.summary.stats[pid]||{}).tov||0));
-      const notes=[];
-      if(ptsA&&ptsA.dir==='up')notes.push('scoring up ('+ptsA.early+'→'+ptsA.late+')');
-      if(minA&&minA.dir==='up')notes.push('minutes climbing');
-      if(tovA&&tovA.dir==='down')notes.push('ball security improving');
-      const down=[];
-      if(minA&&minA.dir==='down')down.push('minutes dipping');
-      if(ptsA&&ptsA.dir==='down'&&a.pts>0)down.push('scoring cooled ('+ptsA.early+'→'+ptsA.late+')');
-      if(tovA&&tovA.dir==='up')down.push('turnovers rising');
-      if(notes.length)rising.push({name:pnum(d.names,pid)+' '+pname(d.names,pid),notes});
-      if(down.length)monitor.push({name:pnum(d.names,pid)+' '+pname(d.names,pid),notes:down});
+      const ptsVals=gs.map(g=>(g.summary.stats[pid]||{}).pts||0);
+      const minVals=gs.map(g=>+(g.summary.minutes[pid]||0).toFixed(1));
+      const tovVals=gs.map(g=>(g.summary.stats[pid]||{}).tov||0);
+      const rebVals=gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.oreb||0)+(s.dreb||0);});
+      const astVals=gs.map(g=>(g.summary.stats[pid]||{}).ast||0);
+      const signals=[];
+      // pts
+      const pts3=metricArc(ptsVals,3),pts5=metricArc(ptsVals,5);
+      if(pts3&&pts3.dir!=='flat'){const conf=pts5&&pts5.dir===pts3.dir;signals.push({cat:pts3.dir==='up'?'up':'down',text:'scoring '+(pts3.dir==='up'?'up':'down')+' '+pts3.early+'→'+pts3.late+(conf?' ✓':''),conf});}
+      // minutes
+      const min3=metricArc(minVals,3),min5=metricArc(minVals,5);
+      if(min3&&min3.dir!=='flat'){const conf=min5&&min5.dir===min3.dir;signals.push({cat:min3.dir==='up'?'up':'down',text:'minutes '+(min3.dir==='up'?'climbing':'dipping')+(conf?' ✓':''),conf});}
+      // turnovers (down = good)
+      const tov3=metricArc(tovVals,3),tov5=metricArc(tovVals,5);
+      if(tov3&&tov3.dir!=='flat'){const good=tov3.dir==='down';const conf=tov5&&tov5.dir===tov3.dir;signals.push({cat:good?'up':'down',text:good?'turnovers down '+tov3.early+'→'+tov3.late+(conf?' ✓':''):'turnover rate up '+tov3.early+'→'+tov3.late+(conf?' ✓':''),conf});}
+      // assists
+      const ast3=metricArc(astVals,3);
+      if(ast3&&ast3.dir!=='flat')signals.push({cat:ast3.dir==='up'?'up':'down',text:'assists '+(ast3.dir==='up'?'up '+ast3.early+'→'+ast3.late:'down '+ast3.early+'→'+ast3.late)});
+      entries.push({name:pnum(d.names,pid)+' '+pname(d.names,pid),signals,pid});
     });
-    h+='<div class="card"><div class="sec-h">Player movement &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">3-game rolling direction · players with 4+ games</span></div>';
+    const rising=entries.filter(e=>e.signals.some(s=>s.cat==='up'));
+    const monitor=entries.filter(e=>e.signals.some(s=>s.cat==='down'));
+    h+='<div class="card"><div class="sec-h">Player movement &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">3g + 5g rolling windows · ✓ = confirmed across both · players with 4+ games in this filter</span></div>';
     h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">';
-    h+='<div><div style="font-size:12px;font-weight:700;color:var(--windk);margin-bottom:8px;">▲ Trending up</div>';
-    h+=rising.length?rising.map(r=>'<div style="font-size:12.5px;color:var(--ink2);margin-bottom:6px;"><strong>'+r.name+'</strong> — '+r.notes.join(', ')+'</div>').join(''):'<div style="color:var(--muted);font-size:12px;">No clear upward movers yet.</div>';
+    h+='<div><div style="font-size:12px;font-weight:700;color:var(--windk);margin-bottom:8px;">▲ Moving forward</div>';
+    if(rising.length){
+      rising.forEach(r=>{
+        const ups=r.signals.filter(s=>s.cat==='up');
+        h+='<div style="font-size:12.5px;color:var(--ink2);margin-bottom:8px;"><strong>'+r.name+'</strong><br><span style="font-size:11.5px;">'+ups.map(s=>'<span style="color:'+(s.conf?'var(--windk)':'var(--ink2)')+';">'+s.text+'</span>').join(' · ')+'</span></div>';
+      });
+    }else h+='<div style="color:var(--muted);font-size:12px;">No clear upward movers in this window.</div>';
     h+='</div>';
-    h+='<div><div style="font-size:12px;font-weight:700;color:var(--lossdk);margin-bottom:8px;">▼ Keep an eye on</div>';
-    h+=monitor.length?monitor.map(r=>'<div style="font-size:12.5px;color:var(--ink2);margin-bottom:6px;"><strong>'+r.name+'</strong> — '+r.notes.join(', ')+'</div>').join(''):'<div style="color:var(--muted);font-size:12px;">Nothing flagged — steady across the group.</div>';
+    h+='<div><div style="font-size:12px;font-weight:700;color:var(--lossdk);margin-bottom:8px;">▼ Monitor closely</div>';
+    if(monitor.length){
+      monitor.forEach(r=>{
+        const downs=r.signals.filter(s=>s.cat==='down');
+        h+='<div style="font-size:12.5px;color:var(--ink2);margin-bottom:8px;"><strong>'+r.name+'</strong><br><span style="font-size:11.5px;">'+downs.map(s=>'<span style="color:'+(s.conf?'var(--lossdk)':'var(--ink2)')+';">'+s.text+'</span>').join(' · ')+'</span></div>';
+      });
+    }else h+='<div style="color:var(--muted);font-size:12px;">Nothing flagged — group holding steady.</div>';
     h+='</div></div>';
-    h+='<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--line2);">Direction only, not a verdict — small samples swing. Cross-check against minutes and matchup before acting.</div>';
+    h+='<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--line2);">Signal, not verdict. Small samples move fast. Cross-check minutes played and matchup strength before acting on single-window flags.</div>';
     h+='</div>';
   }
   return h;
@@ -1138,45 +1197,56 @@ function vProgressionParent(d){
   const a=seasonPlayers(d).find(x=>x.pid===pid);
   if(!a)return progressionPickerParent(d);
   const name=pname(d.names,pid),num=pnum(d.names,pid);
+  // use all games for parent progression — game-type filtering is a coach tool
   const gs=d.games;
+  const gpInGs=gs.filter(g=>g.summary&&g.summary.minutes&&(g.summary.minutes[pid]||0)>0).length;
   let h='<button class="back-btn" onclick="selPlayer=null;render();">← Pick a different player</button>';
   h+='<div class="p-player-card"><div style="display:flex;align-items:baseline;gap:8px;"><span class="p-player-num">'+num+'</span><span class="p-player-name">'+name+'</span></div>';
-  h+='<div class="p-player-team">'+d.team.full+'  ·  progression across '+a.gp+' game'+(a.gp===1?'':'s')+'</div></div>';
-  if(gs.length<4){
-    h+='<div class="card"><div class="sec-h">Her season so far</div><div style="font-size:13px;color:var(--ink2);padding:4px 0;">The season\'s just getting started — after 4 games we\'ll be able to show how '+name.split(' ')[0]+'\'s game is developing over time. For now, head to <strong>My Player</strong> for her game-by-game stats.</div></div>';
+  h+='<div class="p-player-team">'+d.team.full+'  ·  '+gpInGs+' game'+(gpInGs===1?'':'s')+' played</div></div>';
+  if(gpInGs<4){
+    h+='<div class="card"><div class="sec-h">Season so far</div><div style="font-size:13px;color:var(--ink2);padding:4px 0;">After 4 games we can show how '+name.split(' ')[0]+'\'s game is developing. Head to <strong>My Player</strong> for her game-by-game stats while the season builds.</div></div>';
     return h;
   }
   const first=name.split(' ')[0];
-  // growth stats
-  const growth=[
-    ['points',gs.map(g=>(g.summary.stats[pid]||{}).pts||0),1,'scoring'],
-    ['rebounds',gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.oreb||0)+(s.dreb||0);}),1,'rebounding'],
-    ['assists',gs.map(g=>(g.summary.stats[pid]||{}).ast||0),1,'setting up teammates'],
-    ['minutes',gs.map(g=>+(g.summary.minutes[pid]||0).toFixed(1)),1,'court time'],
-    ['defense',gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.stl||0)+(s.blk||0);}),1,'steals & blocks']
-  ];
-  const growing=[],steady=[];
-  growth.forEach(m=>{const arc=metricArc(m[1]);if(arc&&arc.dir==='up')growing.push(m[3]);else if(arc&&arc.dir==='flat')steady.push(m[3]);});
+  // growth — use 3g arc, confirm with 5g
+  const arcOf=(vals)=>{const a3=metricArc(vals,3),a5=metricArc(vals,5);return{a3,a5,conf:a3&&a5&&a3.dir===a5.dir};};
+  const ptsArc=arcOf(gs.map(g=>(g.summary.stats[pid]||{}).pts||0));
+  const rebArc=arcOf(gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.oreb||0)+(s.dreb||0);}));
+  const astArc=arcOf(gs.map(g=>(g.summary.stats[pid]||{}).ast||0));
+  const minArc=arcOf(gs.map(g=>+(g.summary.minutes[pid]||0).toFixed(1)));
+  const defArc=arcOf(gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.stl||0)+(s.blk||0);}));
+  const growing=[];
+  if(ptsArc.a3&&ptsArc.a3.dir==='up')growing.push('scoring'+(ptsArc.conf?' (confirmed)':''));
+  if(rebArc.a3&&rebArc.a3.dir==='up')growing.push('rebounding'+(rebArc.conf?' (confirmed)':''));
+  if(astArc.a3&&astArc.a3.dir==='up')growing.push('setting up teammates'+(astArc.conf?' (confirmed)':''));
+  if(defArc.a3&&defArc.a3.dir==='up')growing.push('defensive activity');
+  const steady=[];
+  if(!growing.length){
+    if(ptsArc.a3&&ptsArc.a3.dir==='flat')steady.push('scoring');
+    if(minArc.a3&&minArc.a3.dir==='flat')steady.push('minutes');
+  }
   h+='<div class="card" style="border-left:3px solid var(--win);"><div class="sec-h" style="color:var(--windk);">🌱 What\'s growing</div>';
   if(growing.length){
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Over her last few games, '+first+'\'s <strong>'+growing.join('</strong>, <strong>')+'</strong> '+(growing.length===1?'is':'are')+' trending upward. That\'s real, visible progress — the kind that comes from showing up and putting in the work.</div>';
+    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Over her recent games, '+first+'\'s <strong>'+growing.join('</strong> and <strong>')+'</strong> '+(growing.length===1?'is':'are')+' trending in the right direction. That\'s real, measurable progress.</div>';
   }else if(steady.length){
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">'+first+' has been <strong>consistent</strong> across '+steady.slice(0,3).join(', ')+' — steadiness at this age is its own kind of progress. The upward jumps tend to come in bursts.</div>';
+    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">'+first+' is showing <strong>consistency</strong> in '+steady.join(' and ')+' — at this age, holding your level game to game is its own achievement. The big jumps tend to arrive in clusters.</div>';
   }else{
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Every player\'s arc looks different game to game. '+first+' is getting valuable court time and experience — that foundation is what growth is built on.</div>';
+    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Every player\'s arc varies game to game. '+first+' is building experience and court time — the foundation everything else grows from.</div>';
   }
   h+='</div>';
-  // development — gentle, team-framed
-  const tovArc=metricArc(gs.map(g=>(g.summary.stats[pid]||{}).tov||0));
-  h+='<div class="card" style="border-left:3px solid var(--maple);"><div class="sec-h" style="color:var(--amber);">💪 The next step</div>';
-  if(tovArc&&tovArc.dir==='up'){
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">One friendly thing to keep working on: holding onto the ball under pressure — something almost every young player is building at the same time. It\'s one of the most fixable parts of the game, and it comes with reps and confidence. Nothing to worry about, just the natural next rep.</div>';
+  // next step — one item, gently framed
+  const tovArc=arcOf(gs.map(g=>(g.summary.stats[pid]||{}).tov||0));
+  h+='<div class="card" style="border-left:3px solid var(--maple);"><div class="sec-h" style="color:var(--amber);">💪 Next focus</div>';
+  if(tovArc.a3&&tovArc.a3.dir==='up'&&tovArc.conf){
+    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Ball security is the one area worth a gentle focus — holding possession under pressure is one of the last things to click at this level, and it\'s completely normal. It improves with reps and confidence, not correction.</div>';
+  }else if(minArc.a3&&minArc.a3.dir==='down'&&minArc.conf){
+    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Court time has dipped slightly in the last few games. That\'s worth a conversation with the coach to understand rotation plans heading into the next stretch.</div>';
   }else{
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Nothing jumping out as a concern — '+first+'\'s development is tracking nicely. The best next step at this age is simply more minutes and more touches, which the charts below will keep tracking.</div>';
+    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">No concerns flagged in '+first+'\'s data. The best next step at this stage is more touches and more minutes — the charts below will keep tracking that arc.</div>';
   }
   h+='</div>';
-  // her arc charts
-  h+='<div class="card"><div class="sec-h">'+first+'\'s season arc &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">smoothed trend line over each game</span></div>';
+  // arc charts
+  h+='<div class="card"><div class="sec-h">'+first+'\'s season arc &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">all games · smoothed trend line</span></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">';
   h+='<div class="chart-card"><h4>Minutes per game</h4>'+lineChart(gs,g=>+(g.summary.minutes[pid]||0).toFixed(1),'#5a6472')+'</div>';
   h+='<div class="chart-card"><h4>Points per game</h4>'+lineChart(gs,g=>(g.summary.stats[pid]||{}).pts||0,'#1a9e72')+'</div>';
