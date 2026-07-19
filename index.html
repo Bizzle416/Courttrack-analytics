@@ -1194,58 +1194,112 @@ function vProgressionCoach(d){
 function vProgressionParent(d){
   if(selPlayer==null)return progressionPickerParent(d);
   const pid=selPlayer;
-  const a=seasonPlayers(d).find(x=>x.pid===pid);
+  const allPlayers=seasonPlayers(d);
+  const a=allPlayers.find(x=>x.pid===pid);
   if(!a)return progressionPickerParent(d);
   const name=pname(d.names,pid),num=pnum(d.names,pid);
-  // use all games for parent progression — game-type filtering is a coach tool
   const gs=d.games;
   const gpInGs=gs.filter(g=>g.summary&&g.summary.minutes&&(g.summary.minutes[pid]||0)>0).length;
   let h='<button class="back-btn" onclick="selPlayer=null;render();">← Pick a different player</button>';
   h+='<div class="p-player-card"><div style="display:flex;align-items:baseline;gap:8px;"><span class="p-player-num">'+num+'</span><span class="p-player-name">'+name+'</span></div>';
   h+='<div class="p-player-team">'+d.team.full+'  ·  '+gpInGs+' game'+(gpInGs===1?'':'s')+' played</div></div>';
   if(gpInGs<4){
-    h+='<div class="card"><div class="sec-h">Season so far</div><div style="font-size:13px;color:var(--ink2);padding:4px 0;">After 4 games we can show how '+name.split(' ')[0]+'\'s game is developing. Head to <strong>My Player</strong> for her game-by-game stats while the season builds.</div></div>';
+    h+='<div class="card"><div class="sec-h">Season so far</div><div style="font-size:13px;color:var(--ink2);padding:4px 0;">Trend data is available from 4 games. Head to <strong>My Player</strong> for '+name.split(' ')[0]+'\'s game-by-game stats.</div></div>';
     return h;
   }
   const first=name.split(' ')[0];
-  // growth — use 3g arc, confirm with 5g
-  const arcOf=(vals)=>{const a3=metricArc(vals,3),a5=metricArc(vals,5);return{a3,a5,conf:a3&&a5&&a3.dir===a5.dir};};
-  const ptsArc=arcOf(gs.map(g=>(g.summary.stats[pid]||{}).pts||0));
-  const rebArc=arcOf(gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.oreb||0)+(s.dreb||0);}));
-  const astArc=arcOf(gs.map(g=>(g.summary.stats[pid]||{}).ast||0));
-  const minArc=arcOf(gs.map(g=>+(g.summary.minutes[pid]||0).toFixed(1)));
-  const defArc=arcOf(gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.stl||0)+(s.blk||0);}));
-  const growing=[];
-  if(ptsArc.a3&&ptsArc.a3.dir==='up')growing.push('scoring'+(ptsArc.conf?' (confirmed)':''));
-  if(rebArc.a3&&rebArc.a3.dir==='up')growing.push('rebounding'+(rebArc.conf?' (confirmed)':''));
-  if(astArc.a3&&astArc.a3.dir==='up')growing.push('setting up teammates'+(astArc.conf?' (confirmed)':''));
-  if(defArc.a3&&defArc.a3.dir==='up')growing.push('defensive activity');
-  const steady=[];
-  if(!growing.length){
-    if(ptsArc.a3&&ptsArc.a3.dir==='flat')steady.push('scoring');
-    if(minArc.a3&&minArc.a3.dir==='flat')steady.push('minutes');
-  }
-  h+='<div class="card" style="border-left:3px solid var(--win);"><div class="sec-h" style="color:var(--windk);">🌱 What\'s growing</div>';
-  if(growing.length){
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Over her recent games, '+first+'\'s <strong>'+growing.join('</strong> and <strong>')+'</strong> '+(growing.length===1?'is':'are')+' trending in the right direction. That\'s real, measurable progress.</div>';
-  }else if(steady.length){
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">'+first+' is showing <strong>consistency</strong> in '+steady.join(' and ')+' — at this age, holding your level game to game is its own achievement. The big jumps tend to arrive in clusters.</div>';
+
+  // ── helpers ──────────────────────────────────────────
+  const r1=v=>Math.round(v*10)/10;
+  const arcOf=(vals)=>{
+    const a3=metricArc(vals,3),a5=metricArc(vals,5);
+    return{a3,a5,conf:!!(a3&&a5&&a3.dir===a5.dir&&a3.dir!=='flat'),latest:vals.length?r1(vals[vals.length-1]):0};
+  };
+
+  // ── build arc objects ─────────────────────────────────
+  const ptsVals=gs.map(g=>(g.summary.stats[pid]||{}).pts||0);
+  const rebVals=gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.oreb||0)+(s.dreb||0);});
+  const astVals=gs.map(g=>(g.summary.stats[pid]||{}).ast||0);
+  const minVals=gs.map(g=>+(g.summary.minutes[pid]||0).toFixed(1));
+  const defVals=gs.map(g=>{const s=g.summary.stats[pid]||{};return(s.stl||0)+(s.blk||0);});
+  const tovVals=gs.map(g=>(g.summary.stats[pid]||{}).tov||0);
+  const ptsArc=arcOf(ptsVals),rebArc=arcOf(rebVals),astArc=arcOf(astVals);
+  const minArc=arcOf(minVals),defArc=arcOf(defVals),tovArc=arcOf(tovVals);
+
+  // ── team averages per game played (for proximity logic) ──
+  const teamAvg=(statFn)=>{
+    const vals=allPlayers.filter(p=>p.gp>0).map(p=>{
+      let tot=0;gs.forEach(g=>{const s=g.summary.stats[p.pid]||{};tot+=statFn(s);});return p.gp>0?tot/p.gp:0;
+    });
+    return vals.length?r1(vals.reduce((s,v)=>s+v,0)/vals.length):0;
+  };
+  const teamPtsPG=teamAvg(s=>s.pts||0);
+  const teamRebPG=teamAvg(s=>(s.oreb||0)+(s.dreb||0));
+  const teamAstPG=teamAvg(s=>s.ast||0);
+  const pPtsPG=a.gp>0?r1(a.pts/a.gp):0;
+  const pRebPG=a.gp>0?r1((a.oreb+a.dreb)/a.gp):0;
+  const pAstPG=a.gp>0?r1(a.ast/a.gp):0;
+  const pMinPG=a.gp>0?r1(a.min/a.gp):0;
+  const pTovPG=a.gp>0?r1(a.tov/a.gp):0;
+
+  // ── WHAT'S GROWING ─────────────────────────────────────
+  // Build stat lines: only include if arc is up
+  const growRows=[];
+  const fmt=(early,late,unit,conf)=>'<strong>'+early+(unit||'')+' → '+late+(unit||'')+'</strong> over the last 3 games'+(conf?' <span style="font-size:11px;color:var(--windk);">(holds across 5)</span>':'');
+  if(ptsArc.a3&&ptsArc.a3.dir==='up')growRows.push({label:'Points',detail:fmt(ptsArc.a3.early,ptsArc.a3.late,'',ptsArc.conf)});
+  if(rebArc.a3&&rebArc.a3.dir==='up')growRows.push({label:'Rebounds',detail:fmt(rebArc.a3.early,rebArc.a3.late,'',rebArc.conf)});
+  if(astArc.a3&&astArc.a3.dir==='up')growRows.push({label:'Assists',detail:fmt(astArc.a3.early,astArc.a3.late,'',astArc.conf)});
+  if(defArc.a3&&defArc.a3.dir==='up')growRows.push({label:'Steals + blocks',detail:fmt(defArc.a3.early,defArc.a3.late,'',defArc.conf)});
+  if(minArc.a3&&minArc.a3.dir==='up')growRows.push({label:'Minutes',detail:fmt(minArc.a3.early,minArc.a3.late,' min',minArc.conf)});
+
+  h+='<div class="card" style="border-left:3px solid var(--win);"><div class="sec-h" style="color:var(--windk);">📈 What\'s moving up</div>';
+  if(growRows.length){
+    h+='<div style="display:flex;flex-direction:column;gap:7px;">';
+    growRows.forEach(r=>{
+      h+='<div style="font-size:13px;color:var(--ink2);"><span style="font-weight:600;min-width:120px;display:inline-block;">'+r.label+'</span> '+r.detail+'</div>';
+    });
+    h+='</div>';
   }else{
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Every player\'s arc varies game to game. '+first+' is building experience and court time — the foundation everything else grows from.</div>';
+    // No upward movement — check for flat (consistency) or general no-signal
+    const flatStats=[];
+    if(ptsArc.a3&&ptsArc.a3.dir==='flat')flatStats.push('points ('+pPtsPG+'/game)');
+    if(rebArc.a3&&rebArc.a3.dir==='flat')flatStats.push('rebounds ('+pRebPG+'/game)');
+    if(minArc.a3&&minArc.a3.dir==='flat')flatStats.push('minutes ('+pMinPG+'/game)');
+    if(flatStats.length){
+      h+='<div style="font-size:13px;color:var(--ink2);">'+first+'\'s stats have been consistent across the last 3 games: '+flatStats.join(', ')+'. No upward movement yet in this window.</div>';
+    }else{
+      h+='<div style="font-size:13px;color:var(--ink2);">No clear upward movement across the last 3 games. Check the arc charts below for the full season picture.</div>';
+    }
   }
   h+='</div>';
-  // next step — one item, gently framed
-  const tovArc=arcOf(gs.map(g=>(g.summary.stats[pid]||{}).tov||0));
-  h+='<div class="card" style="border-left:3px solid var(--maple);"><div class="sec-h" style="color:var(--amber);">💪 Next focus</div>';
+
+  // ── NEXT FOCUS ──────────────────────────────────────────
+  // Priority: 1) confirmed rising turnovers  2) confirmed dropping minutes  3) proximity to team average on a key stat
+  h+='<div class="card" style="border-left:3px solid var(--maple);"><div class="sec-h" style="color:var(--amber);">🎯 Next focus</div>';
+  let focusHtml='';
   if(tovArc.a3&&tovArc.a3.dir==='up'&&tovArc.conf){
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Ball security is the one area worth a gentle focus — holding possession under pressure is one of the last things to click at this level, and it\'s completely normal. It improves with reps and confidence, not correction.</div>';
+    focusHtml='<div style="font-size:13px;color:var(--ink2);">Turnovers: <strong>'+tovArc.a3.early+' → '+tovArc.a3.late+' per game</strong> over the last 5 games. Ball security is the stat most directly in '+first+'\'s control.</div>';
   }else if(minArc.a3&&minArc.a3.dir==='down'&&minArc.conf){
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">Court time has dipped slightly in the last few games. That\'s worth a conversation with the coach to understand rotation plans heading into the next stretch.</div>';
+    focusHtml='<div style="font-size:13px;color:var(--ink2);">Minutes have dropped from <strong>'+minArc.a3.early+' → '+minArc.a3.late+' per game</strong> across the last 5 games. Worth raising with the coach to understand rotation plans.</div>';
   }else{
-    h+='<div style="font-size:13px;color:var(--ink2);line-height:1.6;">No concerns flagged in '+first+'\'s data. The best next step at this stage is more touches and more minutes — the charts below will keep tracking that arc.</div>';
+    // Find the stat where she's closest to the team average from below — that's the next threshold
+    const gaps=[
+      {label:'rebounds',pg:pRebPG,team:teamRebPG,unit:''},
+      {label:'points',pg:pPtsPG,team:teamPtsPG,unit:''},
+      {label:'assists',pg:pAstPG,team:teamAstPG,unit:''}
+    ].filter(x=>x.team>0&&x.pg<x.team).map(x=>({...x,gap:x.team-x.pg})).sort((a,b)=>a.gap-b.gap);
+    if(gaps.length){
+      const g=gaps[0];
+      focusHtml='<div style="font-size:13px;color:var(--ink2);">'+first+' is averaging <strong>'+g.pg+g.unit+' '+g.label+' per game</strong>. Team average is <strong>'+g.team+g.unit+'</strong> — a gap of '+r1(g.gap)+'. Closest threshold to the next level.</div>';
+    }else{
+      // She's at or above team average on everything measured — show her best stat vs her season high
+      const ptsHigh=Math.max(...ptsVals,0);
+      focusHtml='<div style="font-size:13px;color:var(--ink2);">No gaps flagged below team average. '+first+'\'s season high is <strong>'+ptsHigh+' points</strong> in a game — consistency toward that level is the next marker.</div>';
+    }
   }
-  h+='</div>';
-  // arc charts
+  h+=focusHtml+'</div>';
+
+  // ── ARC CHARTS ─────────────────────────────────────────
   h+='<div class="card"><div class="sec-h">'+first+'\'s season arc &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">all games · smoothed trend line</span></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">';
   h+='<div class="chart-card"><h4>Minutes per game</h4>'+lineChart(gs,g=>+(g.summary.minutes[pid]||0).toFixed(1),'#5a6472')+'</div>';
