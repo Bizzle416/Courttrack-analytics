@@ -434,17 +434,21 @@ function filteredGames(games){
 
 /* ── parent player helpers ── */
 function playerRole(a,allPlayers){
-  const n=allPlayers.length||1;
-  const rank=(stat)=>allPlayers.slice().sort((x,y)=>y[stat]-x[stat]).findIndex(p=>p.pid===a.pid)+1;
-  const avgMin=allPlayers.reduce((s,p)=>s+p.min,0)/n/(allPlayers[0]?allPlayers.reduce((s,p)=>s+p.gp,0)/n:1)||1;
+  // Rank by per-game rates to avoid bias from missed games
+  const pgRate=(p,stat)=>p.gp>0?p[stat]/p.gp:0;
+  const pgRateReb=(p)=>p.gp>0?(p.oreb+p.dreb)/p.gp:0;
+  const rankBy=(fn)=>allPlayers.slice().sort((x,y)=>fn(y)-fn(x)).findIndex(p=>p.pid===a.pid)+1;
+  const astRank=rankBy(p=>pgRate(p,'ast'));
+  const rebRank=rankBy(pgRateReb);
+  const ptsRank=rankBy(p=>pgRate(p,'pts'));
+  const stlRank=rankBy(p=>pgRate(p,'stl'));
+  const avgMinPG=allPlayers.filter(p=>p.gp>0).reduce((s,p)=>s+p.min/p.gp,0)/(allPlayers.filter(p=>p.gp>0).length||1);
   const minPG=a.gp>0?a.min/a.gp:0;
-  const astRank=rank('ast'),rebRank=rank(p=>p.oreb+p.dreb),ptsRank=rank('pts'),stlRank=rank('stl');
-  const rebVal=a.oreb+a.dreb;
   if(astRank===1&&a.ast>0)return'Primary ball-handler';
-  if(rebRank===1&&rebVal>0)return'Team rebounder';
+  if(rebRank===1&&(a.oreb+a.dreb)>0)return'Team rebounder';
   if(ptsRank<=2&&a.pts>0)return'Primary scorer';
   if(stlRank===1&&a.stl>0)return'Defensive anchor';
-  if(minPG>=(avgMin*0.55))return'Key rotation player';
+  if(minPG>=(avgMinPG*0.55))return'Key rotation player';
   return'Developing rotation player';
 }
 function rollingAvg(vals,n){
@@ -462,9 +466,10 @@ function trendBadge(vals){
   const early=ra[2];
   const late=ra[ra.length-1];
   if(early===0&&late===0)return'<span class="trend-badge trend-flat">— steady</span>';
-  const base=Math.max(early,0.5);
-  if(late>early+0.5&&late>base*1.12)return'<span class="trend-badge trend-up">▲ trending up</span>';
-  if(late<early-0.5&&late<base*0.88)return'<span class="trend-badge trend-down">▼ trending down</span>';
+  const base=Math.max(early,0.1); // avoid div/0; use tiny floor not 0.5
+  const changePct=(late-early)/base;
+  if(changePct>0.12)return'<span class="trend-badge trend-up">▲ trending up</span>';
+  if(changePct<-0.12)return'<span class="trend-badge trend-down">▼ trending down</span>';
   return'<span class="trend-badge trend-flat">— steady</span>';
 }
 function playerSummary(a,allPlayers,data,pid){
@@ -554,8 +559,9 @@ function lineChart(games,fn,color,fmt){
   games.forEach((g,i)=>{s+='<circle cx="'+xOf(i)+'" cy="'+yOf(vals[i])+'" r="2.5" fill="'+color+'" fill-opacity="0.25"><title>'+gLabel(g)+': '+(fmt?fmt(vals[i]):vals[i])+'</title></circle>';});
   let path='';ra.forEach((v,i)=>{path+=(i?'L':'M')+xOf(i).toFixed(1)+' '+yOf(v).toFixed(1)+' ';});
   s+='<path d="'+path+'" fill="none" stroke="'+color+'" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
-  s+='<circle cx="'+xOf(n-1)+'" cy="'+yOf(ra[n-1])+'" r="3.6" fill="'+color+'"/>';
+  s+='<circle cx="'+xOf(n-1)+'" cy="'+yOf(ra[n-1])+'" r="3.6" fill="'+color+'"><title>3-game rolling avg: '+(fmt?fmt(Math.round(ra[n-1]*10)/10):Math.round(ra[n-1]*10)/10)+'</title></circle>';
   s+='<text x="'+xOf(n-1)+'" y="'+(yOf(ra[n-1])-7)+'" text-anchor="middle" font-size="10" font-weight="700" fill="'+color+'">'+(fmt?fmt(Math.round(ra[n-1]*10)/10):Math.round(ra[n-1]*10)/10)+'</text>';
+  s+='<text x="'+xOf(n-1)+'" y="'+(yOf(ra[n-1])-17)+'" text-anchor="middle" font-size="8" fill="'+color+'" opacity="0.6">3g avg</text>';
   games.forEach((g,i)=>{if(n>8&&i%2!==0&&i!==n-1)return;s+='<text x="'+xOf(i)+'" y="'+(H+12)+'" text-anchor="middle" font-size="8" fill="#9aa4b2">'+(g.round?'R'+g.round:(g.opponent||'?').substring(0,3))+'</text>';});
   return s+'</svg>';
 }
@@ -584,13 +590,16 @@ function coachRead(vals,label,goodDir,unit){
     const body=a.dir==='flat'?('~'+a.late+u):(a.early+u+' → '+a.late+u);
     return'<span style="margin-right:10px;"><span class="trend-badge '+cls+'">'+arrow+' '+window+': '+word+'</span> <span style="color:var(--ink2);font-size:11px;">'+body+'</span></span>';
   };
-  // Agreement signal: both point same direction = confirmed
+  // Agreement / disagreement signals
   let confirm='';
   if(a5&&a3.dir===a5.dir&&a3.dir!=='flat'){
     const good=goodDir>0?a3.dir==='up':a3.dir==='down';
-    confirm='<span style="font-size:11px;color:'+(good?'var(--windk)':'var(--lossdk)')+';">'+(good?'✓ confirmed across both windows':'⚠ sustained across both windows')+'</span>';
+    confirm='<span style="font-size:11px;color:'+(good?'var(--windk)':'var(--lossdk)')+'">'+(good?'✓ confirmed across both windows':'⚠ sustained across both windows')+'</span>';
   }else if(a5&&a3.dir!==a5.dir&&a3.dir!=='flat'){
     confirm='<span style="font-size:11px;color:var(--muted);">Recent shift — not yet confirmed over 5 games</span>';
+  }else if(a5&&a3.dir==='flat'&&a5.dir!=='flat'){
+    const good=goodDir>0?a5.dir==='up':a5.dir==='down';
+    confirm='<span style="font-size:11px;color:'+(good?'var(--windk)':'var(--lossdk)')+'">'+(good?'↗ 5g shows recovering trend':'↘ 5g shows fading trend')+' (3g stabilising)</span>';
   }
   return'<div class="arc-read" style="flex-direction:column;align-items:flex-start;gap:3px;">'+renderArc(a3,'3g')+renderArc(a5,'5g')+(confirm?'<div>'+confirm+'</div>':'')+'</div>';
 }
@@ -776,11 +785,29 @@ function toggleParentGame(gid){expandedParentGame=expandedParentGame===gid?null:
 /* ════════════════════════════════════════
    COACH-ONLY VIEWS
    ════════════════════════════════════════ */
+function seasonPlayersFiltered(data,games){
+  const agg={};
+  games.forEach(g=>{
+    Object.keys(g.summary.stats).forEach(pid=>{
+      const min=g.summary.minutes[pid]||0;
+      if(!agg[pid])agg[pid]={pid:+pid,gp:0,min:0,pts:0,fgm:0,fga:0,fgm3:0,fga3:0,ftm:0,fta:0,ast:0,oreb:0,dreb:0,stl:0,blk:0,tov:0,viol:0,foul:0,pm:0};
+      const a=agg[pid],s=g.summary.stats[pid]||{};
+      if(min>0.5)a.gp++;
+      a.min+=min;
+      STAT_KEYS.forEach(k=>a[k]+=s[k]||0);
+      a.pm+=(g.summary.plusMinus&&g.summary.plusMinus[pid])||0;
+    });
+  });
+  return Object.values(agg).filter(a=>a.gp>0||a.min>0.5).sort((a,b)=>b.pts-a.pts);
+}
 function vPlayersCoach(d){
   if(selPlayer!=null)return playerPanelCoach(d,selPlayer);
-  const rows=seasonPlayers(d);
-  if(!rows.length)return'<div class="card"><div class="loading">No player data yet.</div></div>';
-  let h='<div class="card"><div class="sec-h">Season player stats — '+d.games.length+' game'+(d.games.length===1?'':'s')+' · click a player for detail</div><div class="tbl-wrap"><table><thead><tr><th>Player</th><th>GP</th><th>Min</th><th>PTS</th><th>FG</th><th>FG%</th><th>3P</th><th>FT</th><th>OREB</th><th>DREB</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th><th>VIOL</th><th>F</th><th>+/−</th><th>Pts/40</th></tr></thead><tbody>';
+  const gs=filteredGames(d.games);
+  const rows=seasonPlayersFiltered(d,gs);
+  const filterLabel=activeGameType==='all'?'all games':{vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'}[activeGameType]+' games';
+  let h=gameTypeFilterBar(d.games);
+  if(!rows.length)return h+'<div class="card"><div class="loading">No player data for '+filterLabel+'.</div></div>';
+  h+='<div class="card"><div class="sec-h">Player stats — '+filterLabel+' ('+gs.length+' game'+(gs.length===1?'':'s')+') · click a player for detail</div><div class="tbl-wrap"><table><thead><tr><th>Player</th><th>GP</th><th>Min</th><th>PTS</th><th>FG</th><th>FG%</th><th>3P</th><th>FT</th><th>OREB</th><th>DREB</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th><th>VIOL</th><th>F</th><th>+/−</th><th>Pts/40</th></tr></thead><tbody>';
   rows.forEach(a=>{
     h+='<tr class="clickable" onclick="openPlayer('+a.pid+')"><td>'+pnum(d.names,a.pid)+' '+pname(d.names,a.pid)+'</td><td>'+a.gp+'</td><td>'+fmtMin(a.min)+'</td><td><strong>'+a.pts+'</strong></td><td>'+a.fgm+'/'+a.fga+'</td><td>'+pct(a.fgm,a.fga)+'</td><td>'+(a.fga3?a.fgm3+'/'+a.fga3:'—')+'</td><td>'+(a.fta?a.ftm+'/'+a.fta:'—')+'</td><td>'+a.oreb+'</td><td>'+a.dreb+'</td><td>'+(a.oreb+a.dreb)+'</td><td>'+a.ast+'</td><td>'+a.stl+'</td><td>'+a.blk+'</td><td>'+a.tov+'</td><td>'+a.viol+'</td><td>'+a.foul+'</td><td><span class="'+(a.pm>0?'pos':a.pm<0?'neg':'')+'">'+(a.pm>0?'+':'')+a.pm+'</span></td><td>'+per40(a.pts,a.min)+'</td></tr>';
   });
@@ -788,12 +815,14 @@ function vPlayersCoach(d){
 }
 function openPlayer(pid){selPlayer=pid;expandedParentGame=null;render();}
 function playerPanelCoach(d,pid){
+  // Player panel always shows full season (all game types) — filter note shown if active
   const a=seasonPlayers(d).find(x=>x.pid===pid);
   if(!a)return'<div class="card">Player not found.</div>';
   const pergame=d.games.map(g=>({g,s:g.summary.stats[pid]||{},m:g.summary.minutes[pid]||0,pm:(g.summary.plusMinus||{})[pid]}));
   const shots=d.games.flatMap(g=>homeShots(g).filter(s=>s.player_id===pid));
+  const filterNote=activeGameType!=='all'?' &nbsp;·&nbsp; <span style="font-size:11px;font-weight:400;color:var(--muted);">Stats below = all game types (switch filter on Players tab to compare by type)</span>':'';
   let h='<button class="back-btn" onclick="selPlayer=null;render();">← All players</button>';
-  h+='<div class="card"><div class="pp-head"><span class="pp-num">'+pnum(d.names,pid)+'</span><span class="pp-name">'+pname(d.names,pid)+'</span><span style="color:var(--muted);font-size:13px;">'+d.team.full+'</span></div>';
+  h+='<div class="card"><div class="pp-head"><span class="pp-num">'+pnum(d.names,pid)+'</span><span class="pp-name">'+pname(d.names,pid)+'</span><span style="color:var(--muted);font-size:13px;">'+d.team.full+filterNote+'</span></div>';
   h+='<div class="tiles" style="margin-top:14px;">'
     +'<div class="tile"><div class="v disp">'+a.pts+'</div><div class="l">Points ('+a.gp+' GP)</div></div>'
     +'<div class="tile"><div class="v disp">'+pct(a.fgm,a.fga)+'</div><div class="l">FG% ('+a.fgm+'/'+a.fga+')</div></div>'
@@ -822,18 +851,21 @@ function playerPanelCoach(d,pid){
 
 function vShooting(d){
   const f=shootFilters;
-  let shots=d.games.flatMap(g=>homeShots(g).map(s=>({...s,_gid:String(g.id),_glabel:gLabel(g)})));
+  const gsForShooting=filteredGames(d.games);
+  let shots=gsForShooting.flatMap(g=>homeShots(g).map(s=>({...s,_gid:String(g.id),_glabel:gLabel(g)})));
   if(f.game!=='all')shots=shots.filter(s=>s._gid===f.game);
   if(f.player!=='all')shots=shots.filter(s=>String(s.player_id)===f.player);
   if(f.q!=='all')shots=shots.filter(s=>String(s.period)===f.q);
   if(f.result!=='all')shots=shots.filter(s=>f.result==='made'?s.made:!s.made);
   const playerSet=new Map();
-  d.games.flatMap(g=>homeShots(g)).forEach(s=>{
+  gsForShooting.flatMap(g=>homeShots(g)).forEach(s=>{
     if(s.player_id!=null){const k=String(s.player_id);if(!playerSet.has(k))playerSet.set(k,s.player_id);}
   });
   const players=[...playerSet.values()];
-  let h='<div class="card"><div class="sec-h">Shot chart — aggregated across games</div><div class="filters">';
-  h+='<label class="flt">Game<select onchange="shootFilters.game=this.value;render();"><option value="all"'+(f.game==='all'?' selected':'')+'>All games</option>'+d.games.map(g=>'<option value="'+g.id+'"'+(f.game===String(g.id)?' selected':'')+'>'+gLabel(g)+'</option>').join('')+'</select></label>';
+  const filterLabel=activeGameType==='all'?'all games':{vjbl:'VJBL',domestic:'Domestic',tournament:'Tournament'}[activeGameType]+' games';
+  let h=gameTypeFilterBar(d.games);
+  h+='<div class="card"><div class="sec-h">Shot chart — '+filterLabel+'</div><div class="filters">';
+  h+='<label class="flt">Game<select onchange="shootFilters.game=this.value;render();"><option value="all"'+(f.game==='all'?' selected':'')+'>All games</option>'+gsForShooting.map(g=>'<option value="'+g.id+'"'+(f.game===String(g.id)?' selected':'')+'>'+gLabel(g)+'</option>').join('')+'</select></label>';
   h+='<label class="flt">Player<select onchange="shootFilters.player=this.value;render();"><option value="all"'+(f.player==='all'?' selected':'')+'>All players</option>'+players.map(p=>'<option value="'+p+'"'+(f.player===String(p)?' selected':'')+'>'+pname(d.names,p)+'</option>').join('')+'</select></label>';
   h+='<label class="flt">Quarter<select onchange="shootFilters.q=this.value;render();"><option value="all"'+(f.q==='all'?' selected':'')+'>All</option>'+[1,2,3,4].map(q=>'<option value="'+q+'"'+(f.q===String(q)?' selected':'')+'>Q'+q+'</option>').join('')+'</select></label>';
   h+='<label class="flt">Result<select onchange="shootFilters.result=this.value;render();"><option value="all">All shots</option><option value="made"'+(f.result==='made'?' selected':'')+'>Made</option><option value="missed"'+(f.result==='missed'?' selected':'')+'>Missed</option></select></label>';
@@ -902,7 +934,8 @@ function oppBoxScore(d,g){
 }
 function oppTeamOnlyCard(g){
   const ot=oppTeamTotals(g),to=timeoutCounts(g);
-  return'<div style="font-size:13px;color:var(--ink2);line-height:2;"><strong>'+ot.pts+'</strong> points scored against us'+(ot.reb?' &middot; <strong>'+ot.reb+'</strong> rebounds against ('+ot.oreb+' off / '+ot.dreb+' def)':' &middot; rebounds not logged')+' &middot; <strong>'+ot.tov+'</strong> turnovers forced &middot; timeouts: them '+to.a+', us '+to.h+'<br><span style="color:var(--muted);font-size:12px;">No individual opponent tracking this game.</span></div>';
+  const reason=g.filmed===false?'Game not filmed — individual tracking unavailable.':'Individual opponent tracking not logged for this game.';
+  return'<div style="font-size:13px;color:var(--ink2);line-height:2;"><strong>'+ot.pts+'</strong> points scored against us'+(ot.reb?' &middot; <strong>'+ot.reb+'</strong> rebounds against ('+ot.oreb+' off / '+ot.dreb+' def)':' &middot; rebounds not logged')+' &middot; <strong>'+ot.tov+'</strong> turnovers forced &middot; timeouts: them '+to.a+', us '+to.h+'<br><span style="color:var(--muted);font-size:12px;">'+reason+'</span></div>';
 }
 function toggleOppGame(gid){expandedOppGame=expandedOppGame===gid?null:gid;render();}
 
@@ -913,7 +946,7 @@ function gameTypeFilterBar(allGs){
   const activeCls={all:'active-all',vjbl:'active-vjbl',domestic:'active-dom',tournament:'active-tour'};
   const counts={all:allGs.length};
   ['vjbl','domestic','tournament'].forEach(t=>{counts[t]=allGs.filter(g=>(g.gameType||'vjbl')===t).length;});
-  let h='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">';
+  let h='<div class="type-pills">';
   types.forEach(t=>{
     if(t!=='all'&&counts[t]===0)return;
     const active=activeGameType===t;
@@ -991,7 +1024,7 @@ function playerPanelParent(d,pid){
   h+='<span class="p-player-num">'+num+'</span>';
   h+='<span class="p-player-name">'+name+'</span>';
   h+='</div>';
-  h+='<div class="p-player-team">'+d.team.full+'  ·  '+a.gp+' game'+(a.gp===1?'':' s')+' played</div>';
+  h+='<div class="p-player-team">'+d.team.full+'  ·  '+a.gp+' game'+(a.gp===1?'':'s')+' played</div>';
   h+='<div class="p-role-badge">'+role+'</div>';
   h+='<div class="p-summary">'+summary+'</div>';
   h+='</div>';
@@ -1114,8 +1147,8 @@ function vProgressionCoach(d){
   if(gs.length<2)return h+'<div class="card"><div class="sec-h">Season progression</div><div style="color:var(--muted);font-size:13px;padding:6px 0;">Need at least 2 '+flabel+' synced'+(gs.length===1?' — only 1 logged so far':'')+'. Trend reads unlock at 4 games.</div></div>';
   // cumulative record arc
   let w=0,l=0,dr=0;gs.forEach(g=>{const diff=(g.scoreHome||0)-(g.scoreAway||0);if(diff>0)w++;else if(diff<0)l++;else dr++;});
-  const has5=(gs.length>=5);
-  const trendNote=has5?'3-game (short signal) + 5-game (confirmed trend)':'3-game trend line · 5-game window available at 6+ games';
+  const has5=(gs.length>=6);
+  const trendNote=has5?'3-game (short signal) + 5-game (confirmed trend)':'3-game trend line · 5-game confirmation window unlocks at 6 games';
   let h2='<div class="card"><div class="sec-h">Season arc — '+flabel+' &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);">'+gs.length+' games · '+trendNote+'</span></div>';
   h2+='<div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px;">Record: <strong>'+w+'–'+l+(dr?'–'+dr:'')+'</strong>. Dots = individual games, line = rolling average. Where both 3g and 5g windows agree, the trend is real — treat single-window signals with caution.</div>';
   h2+='<div class="charts">';
@@ -1160,8 +1193,8 @@ function vProgressionCoach(d){
       const tov3=metricArc(tovVals,3),tov5=metricArc(tovVals,5);
       if(tov3&&tov3.dir!=='flat'){const good=tov3.dir==='down';const conf=tov5&&tov5.dir===tov3.dir;signals.push({cat:good?'up':'down',text:good?'turnovers down '+tov3.early+'→'+tov3.late+(conf?' ✓':''):'turnover rate up '+tov3.early+'→'+tov3.late+(conf?' ✓':''),conf});}
       // assists
-      const ast3=metricArc(astVals,3);
-      if(ast3&&ast3.dir!=='flat')signals.push({cat:ast3.dir==='up'?'up':'down',text:'assists '+(ast3.dir==='up'?'up '+ast3.early+'→'+ast3.late:'down '+ast3.early+'→'+ast3.late)});
+      const ast3=metricArc(astVals,3),ast5=metricArc(astVals,5);
+      if(ast3&&ast3.dir!=='flat'){const conf=ast5&&ast5.dir===ast3.dir;signals.push({cat:ast3.dir==='up'?'up':'down',text:'assists '+(ast3.dir==='up'?'up '+ast3.early+'→'+ast3.late:'down '+ast3.early+'→'+ast3.late)+(conf?' ✓':''),conf});}
       entries.push({name:pnum(d.names,pid)+' '+pname(d.names,pid),signals,pid});
     });
     const rising=entries.filter(e=>e.signals.some(s=>s.cat==='up'));
@@ -1290,7 +1323,7 @@ function vProgressionParent(d){
     ].filter(x=>x.team>0&&x.pg<x.team).map(x=>({...x,gap:x.team-x.pg})).sort((a,b)=>a.gap-b.gap);
     if(gaps.length){
       const g=gaps[0];
-      focusHtml='<div style="font-size:13px;color:var(--ink2);">'+first+' is averaging <strong>'+g.pg+g.unit+' '+g.label+' per game</strong>. Team average is <strong>'+g.team+g.unit+'</strong> — a gap of '+r1(g.gap)+'. Closest threshold to the next level.</div>';
+      focusHtml='<div style="font-size:13px;color:var(--ink2);">'+first+' is averaging <strong>'+g.pg+g.unit+' '+g.label+' per game</strong>. Team average is <strong>'+g.team+g.unit+'</strong> — a gap of '+r1(g.gap)+'.</div>';
     }else{
       // She's at or above team average on everything measured — show her best stat vs her season high
       const ptsHigh=Math.max(...ptsVals,0);
@@ -1333,14 +1366,19 @@ function renderTabs(){
 }
 function switchTeam(k){
   curTeam=k;selPlayer=null;expandedGame=null;expandedOppGame=null;expandedParentGame=null;
-  activeGameType='all';window.gamesTypeFilter='all';
+  activeGameType='all';window.gamesTypeFilter='all';selPlayer=null;
   shootFilters={game:'all',player:'all',q:'all',result:'all'};
   oppShootFilters={game:'all',q:'all',result:'all'};
   document.getElementById('team-dropdown').classList.remove('open');
   document.getElementById('team-btn').classList.remove('open');
   render(true);
 }
-function switchView(v){curView=v;render();}
+function switchView(v){
+  curView=v;
+  // Keep Games tab filter in sync with global activeGameType
+  if(v==='games')window.gamesTypeFilter=activeGameType;
+  render();
+}
 async function render(reload){
   renderTabs();
   const mainEl=document.getElementById('main');
